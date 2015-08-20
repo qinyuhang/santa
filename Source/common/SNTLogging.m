@@ -14,27 +14,31 @@
 
 #import "SNTLogging.h"
 
+#import <sys/syslog.h>
+
 #ifdef DEBUG
-static int logLevel = LOG_LEVEL_DEBUG;  // default to info
+static int logLevel = LOG_LEVEL_DEBUG;
 #else
-static int logLevel = LOG_LEVEL_INFO;
+static int logLevel = LOG_LEVEL_INFO;  // default to info
 #endif
 
 void logMessage(int level, FILE *destination, NSString *format, ...) {
-  static NSDateFormatter *dateFormatter;
+  static BOOL useSyslog = NO;
   static NSString *binaryName;
   static dispatch_once_t pred;
 
   dispatch_once(&pred, ^{
-      dateFormatter = [[NSDateFormatter alloc] init];
-      [dateFormatter setTimeZone:[NSTimeZone timeZoneWithName:@"UTC"]];
-      [dateFormatter setDateFormat:@"YYYY-MM-dd HH:mm:ss.SSS'Z"];
-
       binaryName = [[NSProcessInfo processInfo] processName];
 
       // If debug logging is enabled, the process must be restarted.
       if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--debug"]) {
         logLevel = LOG_LEVEL_DEBUG;
+      }
+
+      // If requested, redirect output to syslog.
+      if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--syslog"] ||
+          [binaryName isEqual:@"santad"]) {
+        useSyslog = YES;
       }
   });
 
@@ -45,19 +49,18 @@ void logMessage(int level, FILE *destination, NSString *format, ...) {
   NSString *s = [[NSString alloc] initWithFormat:format arguments:args];
   va_end(args);
 
-  // Only prepend timestamp, severity and binary name if stdout is not a TTY
-  if (isatty(fileno(destination))) {
-    fprintf(destination, "%s\n", [s UTF8String]);
-  } else {
+  if (useSyslog) {
     NSString *levelName;
+    int syslogLevel = LOG_DEBUG;
     switch (level) {
-      case LOG_LEVEL_ERROR: levelName = @"E"; break;
-      case LOG_LEVEL_WARN: levelName = @"W"; break;
-      case LOG_LEVEL_INFO: levelName = @"I"; break;
-      case LOG_LEVEL_DEBUG: levelName = @"D"; break;
+      case LOG_LEVEL_ERROR: levelName = @"E"; syslogLevel = LOG_ERR; break;
+      case LOG_LEVEL_WARN: levelName = @"W"; syslogLevel = LOG_WARNING; break;
+      case LOG_LEVEL_INFO: levelName = @"I"; syslogLevel = LOG_INFO; break;
+      case LOG_LEVEL_DEBUG: levelName = @"D"; syslogLevel = LOG_DEBUG; break;
     }
-
-    fprintf(destination, "%s\n", [[NSString stringWithFormat:@"[%@] %@ %@: %@",
-               [dateFormatter stringFromDate:[NSDate date]], levelName, binaryName, s] UTF8String]);
+    syslog(syslogLevel, "%s\n",
+           [[NSString stringWithFormat:@"%@ %@: %@", levelName, binaryName, s] UTF8String]);
+  } else {
+    fprintf(destination, "%s\n", [s UTF8String]);
   }
 }

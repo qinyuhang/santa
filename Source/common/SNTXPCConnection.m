@@ -59,8 +59,7 @@
   if (self) {
     Protocol *validatorProtocol = @protocol(XPCConnectionValidityRequest);
     _validatorInterface = [NSXPCInterface interfaceWithProtocol:validatorProtocol];
-    _currentConnection = [[NSXPCConnection alloc] initWithMachServiceName:name
-                                                                  options:options];
+    _currentConnection = [[NSXPCConnection alloc] initWithMachServiceName:name options:options];
 
     if (!_validatorInterface || !_currentConnection) return nil;
   }
@@ -75,24 +74,22 @@
 #pragma mark Connection set-up
 
 - (void)resume {
-  if (_listenerObject) {
+  if (self.listenerObject) {
     // A new listener doesn't do anything until a client connects.
     self.listenerObject.delegate = self;
     [self.listenerObject resume];
   } else {
     // A new client begins the validation process.
-    NSXPCConnection *connection = _currentConnection;
+    NSXPCConnection *connection = self.currentConnection;
 
-    connection.remoteObjectInterface = _validatorInterface;
+    connection.remoteObjectInterface = self.validatorInterface;
 
     connection.invalidationHandler = ^{
         [self invokeInvalidationHandler];
         self.currentConnection = nil;
     };
 
-    connection.interruptionHandler = ^{
-        [self.currentConnection invalidate];
-    };
+    connection.interruptionHandler = ^{ [self.currentConnection invalidate]; };
 
     [connection resume];
 
@@ -123,6 +120,7 @@
     for (int sleepLoops = 0; sleepLoops < 1000 && !verificationComplete; sleepLoops++) {
       usleep(5000);
     }
+    if (!verificationComplete) [self invalidate];
   }
 }
 
@@ -132,7 +130,7 @@
   if (self.currentConnection) return NO;
 
   connection.exportedObject = self;
-  connection.exportedInterface = _validatorInterface;
+  connection.exportedInterface = self.validatorInterface;
 
   connection.invalidationHandler = ^{
       [self invokeInvalidationHandler];

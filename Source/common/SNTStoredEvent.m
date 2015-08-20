@@ -24,7 +24,9 @@
     [decoder decodeObjectOfClasses:[NSSet setWithObjects:[NSArray class], [cls class], nil] \
                                                   forKey:key]
 
-+ (BOOL)supportsSecureCoding {  return YES; }
++ (BOOL)supportsSecureCoding {
+  return YES;
+}
 
 - (void)encodeWithCoder:(NSCoder *)coder {
   ENCODE(self.idx, @"idx");
@@ -41,6 +43,9 @@
   ENCODE(self.executingUser, @"executingUser");
   ENCODE(self.occurrenceDate, @"occurrenceDate");
   ENCODE(@(self.decision), @"decision");
+  ENCODE(self.pid, @"pid");
+  ENCODE(self.ppid, @"ppid");
+  ENCODE(self.parentName, @"parentName");
 
   ENCODE(self.loggedInUsers, @"loggedInUsers");
   ENCODE(self.currentSessions, @"currentSessions");
@@ -62,7 +67,10 @@
 
     _executingUser = DECODE(NSString, @"executingUser");
     _occurrenceDate = DECODE(NSDate, @"occurrenceDate");
-    _decision = [DECODE(NSNumber, @"decision") intValue];
+    _decision = (santa_eventstate_t)[DECODE(NSNumber, @"decision") intValue];
+    _pid = DECODE(NSNumber, @"pid");
+    _ppid = DECODE(NSNumber, @"ppid");
+    _parentName = DECODE(NSString, @"parentName");
 
     _loggedInUsers = DECODEARRAY(NSString, @"loggedInUsers");
     _currentSessions = DECODEARRAY(NSString, @"currentSessions");
@@ -70,11 +78,11 @@
   return self;
 }
 
-- (BOOL)isEqual:(SNTStoredEvent *)other {
+- (BOOL)isEqual:(id)other {
   if (other == self) return YES;
   if (![other isKindOfClass:[SNTStoredEvent class]]) return NO;
-  return ([self.fileSHA256 isEqual:other.fileSHA256] &&
-          [self.idx isEqual:other.idx]);
+  SNTStoredEvent *o;
+  return ([self.fileSHA256 isEqual:o.fileSHA256] && [self.idx isEqual:o.idx]);
 }
 
 - (NSUInteger)hash {
@@ -87,8 +95,8 @@
 }
 
 - (NSString *)description {
-  return [NSString stringWithFormat:@"SNTStoredEvent[%@] with SHA-256: %@",
-          self.idx, self.fileSHA256];
+  return
+      [NSString stringWithFormat:@"SNTStoredEvent[%@] with SHA-256: %@", self.idx, self.fileSHA256];
 }
 
 @end

@@ -15,18 +15,34 @@
 #import "SNTConfigurator.h"
 
 #import "SNTLogging.h"
+#import "SNTSystemInfo.h"
 
 @interface SNTConfigurator ()
 @property NSString *configFilePath;
 @property NSMutableDictionary *configData;
+
+/// Creating NSRegularExpression objects is not fast, so cache it.
+@property NSRegularExpression *cachedWhitelistDirRegex;
+
+/// Array of keys that cannot be changed while santad is running if santad didn't make the change.
+@property(readonly) NSArray *protectedKeys;
 @end
 
 @implementation SNTConfigurator
 
 /// The hard-coded path to the config file
-static NSString * const kConfigFilePath = @"/var/db/santa/config.plist";
+NSString * const kDefaultConfigFilePath = @"/var/db/santa/config.plist";
 
 /// The keys in the config file
+static NSString * const kClientModeKey = @"ClientMode";
+static NSString * const kWhitelistRegexKey = @"WhitelistRegex";
+static NSString * const kLogAllEventsKey = @"LogAllEvents";
+
+static NSString * const kMoreInfoURLKey = @"MoreInfoURL";
+static NSString * const kEventDetailURLKey = @"EventDetailURL";
+static NSString * const kEventDetailTextKey = @"EventDetailText";
+static NSString * const kDefaultBlockMessage = @"DefaultBlockMessage";
+
 static NSString * const kSyncBaseURLKey = @"SyncBaseURL";
 static NSString * const kClientAuthCertificateFileKey = @"ClientAuthCertificateFile";
 static NSString * const kClientAuthCertificatePasswordKey = @"ClientAuthCertificatePassword";
@@ -34,7 +50,6 @@ static NSString * const kClientAuthCertificateCNKey = @"ClientAuthCertificateCN"
 static NSString * const kClientAuthCertificateIssuerKey = @"ClientAuthCertificateIssuerCN";
 static NSString * const kServerAuthRootsDataKey = @"ServerAuthRootsData";
 static NSString * const kServerAuthRootsFileKey = @"ServerAuthRootsFile";
-static NSString * const kClientModeKey = @"ClientMode";
 
 static NSString * const kMachineOwnerKey = @"MachineOwner";
 static NSString * const kMachineIDKey = @"MachineID";
@@ -54,18 +69,87 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
   return self;
 }
 
-# pragma mark Singleton retriever
+#pragma mark Singleton retriever
 
 + (instancetype)configurator {
   static SNTConfigurator *sharedConfigurator = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-    sharedConfigurator = [[SNTConfigurator alloc] initWithFilePath:kConfigFilePath];
+      sharedConfigurator = [[SNTConfigurator alloc] initWithFilePath:kDefaultConfigFilePath];
   });
   return sharedConfigurator;
 }
 
-# pragma mark Public Interface
+#pragma mark Protected Keys
+
+- (NSArray *)protectedKeys {
+  return @[ kClientModeKey, kWhitelistRegexKey ];
+}
+
+#pragma mark Public Interface
+
+- (santa_clientmode_t)clientMode {
+  int cm = [self.configData[kClientModeKey] intValue];
+  if (cm > CLIENTMODE_UNKNOWN && cm < CLIENTMODE_MAX) {
+    return (santa_clientmode_t)cm;
+  } else {
+    self.configData[kClientModeKey] = @(CLIENTMODE_MONITOR);
+    return CLIENTMODE_MONITOR;
+  }
+}
+
+- (void)setClientMode:(santa_clientmode_t)newMode {
+  if (newMode > CLIENTMODE_UNKNOWN && newMode < CLIENTMODE_MAX) {
+    self.configData[kClientModeKey] = @(newMode);
+    [self saveConfigToDisk];
+  }
+}
+
+- (NSRegularExpression *)whitelistPathRegex {
+  if (!self.cachedWhitelistDirRegex && self.configData[kWhitelistRegexKey]) {
+    NSString *re = self.configData[kWhitelistRegexKey];
+    if (![re hasPrefix:@"^"]) re = [@"^" stringByAppendingString:re];
+    self.cachedWhitelistDirRegex = [NSRegularExpression regularExpressionWithPattern:re
+                                                                             options:0
+                                                                               error:nil];
+  }
+  return self.cachedWhitelistDirRegex;
+}
+
+- (void)setWhitelistPathRegex:(NSRegularExpression *)re {
+  if (!re) {
+    [self.configData removeObjectForKey:kWhitelistRegexKey];
+  } else {
+    self.configData[kWhitelistRegexKey] = [re pattern];
+  }
+  self.cachedWhitelistDirRegex = nil;
+  [self saveConfigToDisk];
+}
+
+- (BOOL)logAllEvents {
+  return [self.configData[kLogAllEventsKey] boolValue];
+}
+
+- (void)setLogAllEvents:(BOOL)logAllEvents {
+  self.configData[kLogAllEventsKey] = @(logAllEvents);
+  [self saveConfigToDisk];
+}
+
+- (NSURL *)moreInfoURL {
+  return [NSURL URLWithString:self.configData[kMoreInfoURLKey]];
+}
+
+- (NSString *)eventDetailURL {
+  return self.configData[kEventDetailURLKey];
+}
+
+- (NSString *)eventDetailText {
+  return self.configData[kEventDetailTextKey];
+}
+
+- (NSString *)defaultBlockMessage {
+  return self.configData[kDefaultBlockMessage];
+}
 
 - (NSURL *)syncBaseURL {
   return [NSURL URLWithString:self.configData[kSyncBaseURLKey]];
@@ -96,92 +180,55 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 }
 
 - (NSString *)machineOwner {
+  NSString *machineOwner;
+
   if (self.configData[kMachineOwnerPlistFileKey] && self.configData[kMachineOwnerPlistKeyKey]) {
     NSDictionary *plist =
         [NSDictionary dictionaryWithContentsOfFile:self.configData[kMachineOwnerPlistFileKey]];
-    return plist[kMachineOwnerPlistKeyKey];
+    machineOwner = plist[self.configData[kMachineOwnerPlistKeyKey]];
   }
 
   if (self.configData[kMachineOwnerKey]) {
-    return self.configData[kMachineOwnerKey];
+    machineOwner = self.configData[kMachineOwnerKey];
   }
 
-  return @"";
+  if (!machineOwner) machineOwner = @"";
+
+  return machineOwner;
 }
 
-- (NSString *)machineIDOverride {
+- (NSString *)machineID {
+  NSString *machineId;
+
   if (self.configData[kMachineIDPlistFileKey] && self.configData[kMachineIDPlistKeyKey]) {
     NSDictionary *plist =
         [NSDictionary dictionaryWithContentsOfFile:self.configData[kMachineIDPlistFileKey]];
-    return plist[kMachineIDPlistKeyKey];
+    machineId = plist[self.configData[kMachineIDPlistKeyKey]];
   }
 
   if (self.configData[kMachineIDKey]) {
-    return self.configData[kMachineIDKey];
+    machineId = self.configData[kMachineIDKey];
   }
 
-  return @"";
-}
-
-- (santa_clientmode_t)clientMode {
-  int cm = [self.configData[kClientModeKey] intValue];
-  if (cm > CLIENTMODE_UNKNOWN && cm < CLIENTMODE_MAX) {
-    return cm;
-  } else {
-    self.configData[kClientModeKey] = @(CLIENTMODE_MONITOR);
-    return CLIENTMODE_MONITOR;
+  if ([machineId length] == 0) {
+    machineId = [SNTSystemInfo hardwareUUID];
   }
+
+  return machineId;
 }
 
-- (void)setClientMode:(santa_clientmode_t)newMode {
-  if (newMode > CLIENTMODE_UNKNOWN && newMode < CLIENTMODE_MAX) {
-    [self reloadConfigData];
-    self.configData[kClientModeKey] = @(newMode);
-    [self saveConfigToDisk];
-  }
-}
-
-#pragma mark Private
-
-///
-///  Saves the current @c _configData to disk.
-///
-- (void)saveConfigToDisk {
-  [self.configData writeToFile:kConfigFilePath atomically:YES];
-}
-
-///
-///  Populate @c self.configData, using the config file on disk if possible,
-///  otherwise an empty mutable dictionary.
-///
-///  If the config file's permissions are not @c 0644, will attempt to set them
-///  but will fail silently if this cannot be done.
-///
 - (void)reloadConfigData {
+  if (!self.configData) self.configData = [NSMutableDictionary dictionary];
+
   NSFileManager *fm = [NSFileManager defaultManager];
-
-  if (![fm fileExistsAtPath:self.configFilePath]) {
-    _configData = [NSMutableDictionary dictionary];
-    return;
-  }
-
-  // Ensure the config file permissions are 0644. Fail silently if they can't be changed.
-  NSDictionary *fileAttrs = [fm attributesOfItemAtPath:self.configFilePath error:nil];
-  if ([fileAttrs filePosixPermissions] != 0644) {
-    [fm setAttributes:@{ NSFilePosixPermissions: @(0644) }
-         ofItemAtPath:self.configFilePath
-                error:nil];
-  }
+  if (![fm fileExistsAtPath:self.configFilePath]) return;
 
   NSError *error;
   NSData *readData = [NSData dataWithContentsOfFile:self.configFilePath
                                             options:NSDataReadingMappedIfSafe
                                               error:&error];
   if (error) {
-    fprintf(stderr, "%s\n", [[NSString stringWithFormat:@"Could not read configuration file %@: %@",
-            self.configFilePath, [error localizedDescription]] UTF8String]);
-
-    _configData = [NSMutableDictionary dictionary];
+    LOGE(@"Could not read configuration file: %@", [error localizedDescription]);
     return;
   }
 
@@ -191,16 +238,33 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
                                                  format:NULL
                                                   error:&error];
   if (error) {
-    fprintf(stderr, "%s\n",
-        [[NSString stringWithFormat:@"Could not parse configuration file %@: %@",
-            self.configFilePath,
-            [error localizedDescription]] UTF8String]);
-
-    _configData = [NSMutableDictionary dictionary];
+    LOGE(@"Could not parse configuration file: %@", [error localizedDescription]);
     return;
   }
 
-  _configData = [configData mutableCopy];
+  // Ensure no-one is trying to change protected keys behind our back.
+  NSMutableDictionary *configDataMutable = [configData mutableCopy];
+  BOOL changed = NO;
+  for (NSString *key in self.protectedKeys) {
+    if (self.configData[key] && configData[key] &&
+        ![self.configData[key] isEqual:configData[key]] && geteuid() == 0) {
+      NSMutableDictionary *configDataMutable = [configData mutableCopy];
+      configDataMutable[key] = self.configData[key];
+      changed = YES;
+      LOGD(@"Ignoring changed configuration key: %@", key);
+    }
+  }
+  self.configData = configDataMutable;
+  if (changed) [self saveConfigToDisk];
+}
+
+#pragma mark Private
+
+///
+///  Saves the current @c self.configData to disk.
+///
+- (void)saveConfigToDisk {
+  [self.configData writeToFile:self.configFilePath atomically:YES];
 }
 
 @end

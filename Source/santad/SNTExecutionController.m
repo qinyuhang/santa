@@ -14,12 +14,16 @@
 
 #import "SNTExecutionController.h"
 
+#include <libproc.h>
+#include <pwd.h>
 #include <utmpx.h>
 
 #include "SNTLogging.h"
 
 #import "SNTCertificate.h"
 #import "SNTCodesignChecker.h"
+#import "SNTCommonEnums.h"
+#import "SNTConfigurator.h"
 #import "SNTDriverManager.h"
 #import "SNTDropRootPrivs.h"
 #import "SNTEventTable.h"
@@ -37,16 +41,13 @@
 - (instancetype)initWithDriverManager:(SNTDriverManager *)driverManager
                             ruleTable:(SNTRuleTable *)ruleTable
                            eventTable:(SNTEventTable *)eventTable
-                        operatingMode:(santa_clientmode_t)operatingMode
                    notifierConnection:(SNTXPCConnection *)notifier {
   self = [super init];
   if (self) {
     _driverManager = driverManager;
     _ruleTable = ruleTable;
     _eventTable = eventTable;
-    _operatingMode = operatingMode;
     _notifierConnection = notifier;
-    LOGI(@"Log format: Decision (A|D), Reason (B|C|S|?), SHA-256, Path, Cert SHA-256, Cert CN");
 
     // Workaround for xpcproxy/libsecurity bug on Yosemite
     // This establishes the XPC connection between libsecurity and syspolicyd.
@@ -58,16 +59,29 @@
 
 #pragma mark Binary Validation
 
-- (void)validateBinaryWithPath:(NSString *)path
-                      userName:(NSString *)userName
-                           pid:(NSNumber *)pid
-                       vnodeId:(uint64_t)vnodeId {
-  SNTFileInfo *binInfo = [[SNTFileInfo alloc] initWithPath:path];
+- (void)validateBinaryWithMessage:(santa_message_t)message {
+  NSString *path = @(message.path);
+  uint64_t vnodeId = message.vnode_id;
+
+  NSError *fileInfoError;
+  SNTFileInfo *binInfo = [[SNTFileInfo alloc] initWithPath:path error:&fileInfoError];
   NSString *sha256 = [binInfo SHA256];
+
+  // If we can't read the file and hash properly, log an error.
+  if (!binInfo || !sha256) {
+    LOGW(@"Failed to read file %@: %@", path, fileInfoError.localizedDescription);
+    [self.driverManager postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vnodeId];
+    [self logDecisionForEventState:EVENTSTATE_ALLOW_UNKNOWN sha256:nil path:path leafCert:nil];
+    return;
+  }
 
   // These will be filled in either in later steps
   santa_action_t respondedAction = ACTION_UNSET;
   SNTRule *rule;
+
+  // Get name of parent process. Do this before responding to be sure parent doesn't go away.
+  char pname[PROC_PIDPATHINFO_MAXSIZE];
+  proc_name(message.ppid, pname, PROC_PIDPATHINFO_MAXSIZE);
 
   // Step 1 - binary rule?
   rule = [self.ruleTable binaryRuleForSHA256:sha256];
@@ -88,7 +102,7 @@
   }
 
   // Step 3 - in scope?
-  if (![self fileIsInScope:path]) {
+  if (!rule && ![self fileIsInScope:path]) {
     [self.driverManager postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vnodeId];
     [self logDecisionForEventState:EVENTSTATE_ALLOW_SCOPE sha256:sha256 path:path leafCert:nil];
     return;
@@ -101,7 +115,9 @@
   }
 
   // Step 5 - log to database and potentially alert user
-  if (respondedAction == ACTION_RESPOND_CHECKBW_DENY || !rule) {
+  if (respondedAction == ACTION_RESPOND_CHECKBW_DENY ||
+      !rule ||
+      [[SNTConfigurator configurator] logAllEvents]) {
     SNTStoredEvent *se = [[SNTStoredEvent alloc] init];
     se.fileSHA256 = sha256;
     se.filePath = path;
@@ -117,10 +133,19 @@
     }
 
     se.signingChain = csInfo.certificates;
-    se.executingUser = userName;
     se.occurrenceDate = [[NSDate alloc] init];
     se.decision = [self eventStateForDecision:respondedAction type:rule.type];
-    se.pid = pid;
+    se.pid = @(message.pid);
+    se.ppid = @(message.ppid);
+    se.parentName = @(pname);
+
+    struct passwd *user = getpwuid(message.userId);
+    endpwent();
+    NSString *userName;
+    if (user) {
+      userName = @(user->pw_name);
+    }
+    se.executingUser = userName;
 
     NSArray *loggedInUsers, *currentSessions;
     [self loggedInUsers:&loggedInUsers sessions:&currentSessions];
@@ -132,14 +157,18 @@
     if (respondedAction == ACTION_RESPOND_CHECKBW_DENY) {
       // So the server has something to show the user straight away, initiate an event
       // upload for the blocked binary rather than waiting for the next sync.
-      // The event upload is skipped if the full path is equal to that of /usr/sbin/santactl so that
+      // The event upload is skipped if the full path is equal to that of santactl so that
       /// on the off chance that santactl is not whitelisted, we don't get into an infinite loop.
-      if (![path isEqual:@"/usr/sbin/santactl"]) {
+      if (![path isEqual:@(kSantaCtlPath)] &&
+          [[SNTConfigurator configurator] syncBaseURL]
+          && ![[SNTConfigurator configurator] syncBackOff]) {
         [self initiateEventUploadForSHA256:sha256];
       }
 
-      [[self.notifierConnection remoteObjectProxy] postBlockNotification:se
-                                                       withCustomMessage:rule.customMsg];
+      if (!rule || rule.state != RULESTATE_SILENT_BLACKLIST) {
+        [[self.notifierConnection remoteObjectProxy] postBlockNotification:se
+                                                         withCustomMessage:rule.customMsg];
+      }
     }
   }
 
@@ -154,51 +183,45 @@
 ///  Checks whether the file at @c path is in-scope for checking with Santa.
 ///
 ///  Files that are out of scope:
-///    + Non Mach-O files
-///    + Files in whitelisted directories.
+///    + Non Mach-O files that are not part of an installer package.
+///    + Files in whitelisted path.
 ///
 ///  @return @c YES if file is in scope, @c NO otherwise.
 ///
 - (BOOL)fileIsInScope:(NSString *)path {
-  // Determine if file is within a whitelisted directory.
-  if ([self pathIsInWhitelistedDir:path]) {
+  // Determine if file is within a whitelisted path
+  NSRegularExpression *re = [[SNTConfigurator configurator] whitelistPathRegex];
+  if ([re numberOfMatchesInString:path options:0 range:NSMakeRange(0, path.length)]) {
     return NO;
   }
 
-  // If file is not a Mach-O file, we're not interested.
-  // TODO(rah): Consider adding an option to check scripts
+  // If file is not a Mach-O file, we're not interested unless it's part of an install package.
+  // TODO(rah): Consider adding an option to check all scripts.
+  // TODO(rah): Consider adding an option to disable package script checks.
   SNTFileInfo *binInfo = [[SNTFileInfo alloc] initWithPath:path];
-  if (![binInfo isMachO]) {
+  if (![binInfo isMachO] && ![path hasPrefix:@"/private/tmp/PKInstallSandbox."]) {
     return NO;
   }
 
   return YES;
 }
 
-- (BOOL)pathIsInWhitelistedDir:(NSString *)path {
-  // TODO(rah): Implement this.
-  return NO;
-}
-
 - (santa_eventstate_t)eventStateForDecision:(santa_action_t)decision type:(santa_ruletype_t)type {
-  if (decision == ACTION_RESPOND_CHECKBW_ALLOW) {
-    if (type == RULETYPE_BINARY) {
-      return EVENTSTATE_ALLOW_BINARY;
-    } else if (type == RULETYPE_CERT) {
-      return EVENTSTATE_ALLOW_CERTIFICATE;
-    } else {
-      return EVENTSTATE_ALLOW_UNKNOWN;
-    }
-  } else if (decision == ACTION_RESPOND_CHECKBW_DENY) {
-    if (type == RULETYPE_BINARY) {
-      return EVENTSTATE_BLOCK_BINARY;
-    } else if (decision == RULETYPE_CERT) {
-      return EVENTSTATE_BLOCK_CERTIFICATE;
-    } else {
-      return EVENTSTATE_BLOCK_UNKNOWN;
-    }
-  } else {
-    return EVENTSTATE_UNKNOWN;
+  switch (decision) {
+    case ACTION_RESPOND_CHECKBW_ALLOW:
+      switch (type) {
+        case RULETYPE_BINARY: return EVENTSTATE_ALLOW_BINARY;
+        case RULETYPE_CERT: return EVENTSTATE_ALLOW_CERTIFICATE;
+        default: return EVENTSTATE_ALLOW_UNKNOWN;
+
+      }
+    case ACTION_RESPOND_CHECKBW_DENY:
+      switch (type) {
+        case RULETYPE_BINARY: return EVENTSTATE_BLOCK_BINARY;
+        case RULETYPE_CERT: return EVENTSTATE_BLOCK_CERTIFICATE;
+        default: return EVENTSTATE_BLOCK_UNKNOWN;
+      }
+    default: return EVENTSTATE_UNKNOWN;
   }
 }
 
@@ -232,8 +255,8 @@
 
   if (cert && cert.SHA256 && cert.commonName) {
     // Also ensure there are no pipes in the cert's common name.
-    NSString *printCommonName = [cert.commonName stringByReplacingOccurrencesOfString:@"|"
-                                                                           withString:@"<pipe>"];
+    NSString *printCommonName =
+        [cert.commonName stringByReplacingOccurrencesOfString:@"|" withString:@"<pipe>"];
     outLog = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@",
                  d, r, sha256, printPath, cert.SHA256, printCommonName];
   } else {
@@ -246,32 +269,21 @@
 }
 
 - (void)initiateEventUploadForSHA256:(NSString *)sha256 {
-  signal(SIGCHLD, SIG_IGN);
-  pid_t child = fork();
-  if (child == 0) {
-    fclose(stdout);
-    fclose(stderr);
-
+  if (fork() == 0) {
     // Ensure we have no privileges
     if (!DropRootPrivileges()) {
-      exit(1);
+      _exit(EPERM);
     }
 
-    exit(execl("/usr/sbin/santactl", "/usr/sbin/santactl", "sync",
-               "singleevent", [sha256 UTF8String], NULL));
+    _exit(execl(kSantaCtlPath, kSantaCtlPath, "sync", "singleevent", [sha256 UTF8String], NULL));
   }
 }
 
 - (santa_action_t)defaultDecision {
-  switch (self.operatingMode) {
-    case CLIENTMODE_MONITOR:
-      return ACTION_RESPOND_CHECKBW_ALLOW;
-    case CLIENTMODE_LOCKDOWN:
-      return ACTION_RESPOND_CHECKBW_DENY;
-    default:
-      // This should never happen, panic and lockdown.
-      LOGE(@"Client mode is unset while enforcement is in effect. Blocking.");
-      return ACTION_RESPOND_CHECKBW_DENY;
+  switch ([[SNTConfigurator configurator] clientMode]) {
+    case CLIENTMODE_MONITOR: return ACTION_RESPOND_CHECKBW_ALLOW;
+    case CLIENTMODE_LOCKDOWN: return ACTION_RESPOND_CHECKBW_DENY;
+    default: return ACTION_RESPOND_CHECKBW_DENY;  // This can't happen.
   }
 }
 
@@ -288,11 +300,10 @@
 }
 
 - (void)loggedInUsers:(NSArray **)users sessions:(NSArray **)sessions {
-  struct utmpx *nxt;
-
   NSMutableDictionary *loggedInUsers = [[NSMutableDictionary alloc] init];
   NSMutableDictionary *loggedInHosts = [[NSMutableDictionary alloc] init];
 
+  struct utmpx *nxt;
   while ((nxt = getutxent())) {
     if (nxt->ut_type != USER_PROCESS) continue;
 
@@ -305,12 +316,12 @@
       sessionName = [NSString stringWithFormat:@"%s@%s", nxt->ut_user, nxt->ut_line];
     }
 
-    if (userName && ![userName isEqual:@""]) {
-      loggedInUsers[userName] = @"";
+    if (userName.length > 0) {
+      loggedInUsers[userName] = [NSNull null];
     }
 
-    if (sessionName && ![sessionName isEqual:@":"]) {
-      loggedInHosts[sessionName] = @"";
+    if (sessionName.length > 1) {
+      loggedInHosts[sessionName] = [NSNull null];
     }
   }
 

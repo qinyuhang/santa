@@ -20,17 +20,15 @@
 
 @implementation SNTEventTable
 
-- (int)initializeDatabase:(FMDatabase *)db fromVersion:(int)version {
+- (uint32_t)initializeDatabase:(FMDatabase *)db fromVersion:(uint32_t)version {
   int newVersion = 0;
 
   if (version < 1) {
     [db executeUpdate:@"CREATE TABLE 'events' ("
-        "'idx' INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "'filesha256' TEXT NOT NULL,"
-        "'eventdata' BLOB"
-        @");"];
+                      @"'idx' INTEGER PRIMARY KEY AUTOINCREMENT,"
+                      @"'filesha256' TEXT NOT NULL,"
+                      @"'eventdata' BLOB);"];
     [db executeUpdate:@"CREATE INDEX filesha256 ON events (filesha256);"];
-
     newVersion = 1;
   }
 
@@ -57,16 +55,6 @@
   return success;
 }
 
-- (SNTStoredEvent *)eventFromResultSet:(FMResultSet *)rs {
-  NSData *eventData = [rs dataForColumn:@"eventdata"];
-  if (!eventData) return nil;
-
-  SNTStoredEvent *event = [NSKeyedUnarchiver unarchiveObjectWithData:eventData];
-  event.idx = @([rs intForColumn:@"idx"]);
-
-  return event;
-}
-
 #pragma mark Querying/Retreiving
 
 - (NSUInteger)pendingEventsCount {
@@ -81,8 +69,8 @@
   __block SNTStoredEvent *storedEvent;
 
   [self inDatabase:^(FMDatabase *db) {
-      FMResultSet *rs = [db executeQuery:@"SELECT * FROM events WHERE filesha256=? LIMIT 1;",
-                            sha256];
+      FMResultSet *rs =
+          [db executeQuery:@"SELECT * FROM events WHERE filesha256=? LIMIT 1;", sha256];
 
       if ([rs next]) {
         storedEvent = [self eventFromResultSet:rs];
@@ -101,13 +89,29 @@
       FMResultSet *rs = [db executeQuery:@"SELECT * FROM events"];
 
       while ([rs next]) {
-        [pendingEvents addObject:[self eventFromResultSet:rs]];
+        id obj = [self eventFromResultSet:rs];
+        if (obj) {
+          [pendingEvents addObject:obj];
+        } else {
+          NSNumber *idx = [rs objectForColumnName:@"idx"];
+          [db executeUpdate:@"DELETE FROM events WHERE idx=?", idx];
+        }
       }
 
       [rs close];
   }];
 
   return pendingEvents;
+}
+
+- (SNTStoredEvent *)eventFromResultSet:(FMResultSet *)rs {
+  NSData *eventData = [rs dataForColumn:@"eventdata"];
+  if (!eventData) return nil;
+
+  SNTStoredEvent *event = [NSKeyedUnarchiver unarchiveObjectWithData:eventData];
+  event.idx = @([rs intForColumn:@"idx"]);
+
+  return event;
 }
 
 #pragma mark Deleting
@@ -122,6 +126,9 @@
   for (NSNumber *index in indexes) {
     [self deleteEventWithId:index];
   }
+  [self inDatabase:^(FMDatabase *db) {
+      [db executeUpdate:@"VACUUM"];
+  }];
 }
 
 @end

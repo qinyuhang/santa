@@ -27,6 +27,8 @@
 
 @implementation SNTDriverManager
 
+static const int MAX_DELAY = 15;
+
 #pragma mark init/dealloc
 
 - (instancetype)init {
@@ -42,13 +44,15 @@
     }
 
     // Locate driver. Wait for it if necessary.
+    int delay = 1;
     do {
       CFRetain(classToMatch);  // this ref is released by IOServiceGetMatchingService
       serviceObject = IOServiceGetMatchingService(kIOMasterPortDefault, classToMatch);
 
       if (!serviceObject) {
         LOGD(@"Waiting for Santa driver to become available");
-        sleep(5);
+        sleep(delay);
+        if (delay < MAX_DELAY) delay *= 2;
       }
     } while (!serviceObject);
     CFRelease(classToMatch);
@@ -79,7 +83,7 @@
   IOServiceClose(_connection);
 }
 
-# pragma mark Incoming messages
+#pragma mark Incoming messages
 
 - (void)listenWithBlock:(void (^)(santa_message_t message))callback {
   kern_return_t kr;
@@ -104,8 +108,9 @@
     return;
   }
 
-  // This will call clientMemoryForType() inside our user client class,
-  // which activates the Kauth listeners.
+  // This will call clientMemoryForType() inside our user client class.
+  // The Kauth listener will start intercepting at this point and sending requests
+  // to our queue.
   kr = IOConnectMapMemory(self.connection, kIODefaultMemoryType, mach_task_self(),
                           &address, &size, kIOMapAnywhere);
   if (kr != kIOReturnSuccess) {
@@ -117,18 +122,17 @@
   self.queueMemory = (IODataQueueMemory *)address;
   dataSize = sizeof(vdata);
 
-  while (IODataQueueWaitForAvailableData(self.queueMemory,
-                                         self.receivePort) == kIOReturnSuccess) {
+  do {
     while (IODataQueueDataAvailable(self.queueMemory)) {
       kr = IODataQueueDequeue(self.queueMemory, &vdata, &dataSize);
       if (kr == kIOReturnSuccess) {
         callback(vdata);
       } else {
-        LOGD(@"Error receiving data: %d", kr);
+        LOGE(@"Error dequeuing data: %d", kr);
         exit(2);
       }
     }
-  }
+  } while (IODataQueueWaitForAvailableData(self.queueMemory, self.receivePort) == kIOReturnSuccess);
 
   IOConnectUnmapMemory(self.connection, kIODefaultMemoryType, mach_task_self(), address);
   mach_port_destroy(mach_task_self(), self.receivePort);

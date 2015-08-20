@@ -69,7 +69,7 @@
 		0D3AFBF018FB4C6C0087BCEE /* SNTDriverManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D7D01861774F93A005DBAB4 /* SNTDriverManager.m */; };
 		0D3AFBF618FB4C7E0087BCEE /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D385DB7180DE4A900418BC6 /* Cocoa.framework */; };
 		0D3AFBF818FB4C870087BCEE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D3AFBF718FB4C870087BCEE /* IOKit.framework */; };
-		0D416401191974F1006A356A /* SNTCommandSyncStatus.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D416400191974F1006A356A /* SNTCommandSyncStatus.m */; };
+		0D416401191974F1006A356A /* SNTCommandSyncState.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D416400191974F1006A356A /* SNTCommandSyncState.m */; };
 		0D41640519197AD7006A356A /* SNTCommandSyncEventUpload.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D41640419197AD7006A356A /* SNTCommandSyncEventUpload.m */; };
 		0D41DAD41A7C28C800A890FE /* SNTEventTableTest.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D41DAD31A7C28C800A890FE /* SNTEventTableTest.m */; };
 		0D42D2B519D1D98A00955F08 /* SNTSystemInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D42D2B419D1D98A00955F08 /* SNTSystemInfo.m */; };
@@ -97,6 +97,10 @@
 		0D7FFD4B1A017D4B00F34435 /* SNTDERDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D7FFD4A1A017D4B00F34435 /* SNTDERDecoder.m */; };
 		0D827E6519DF392E006EC811 /* SNTConfigurator.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D42D2B719D2042900955F08 /* SNTConfigurator.m */; };
 		0D827E6719DF3C74006EC811 /* SNTCommandStatus.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D827E6619DF3C74006EC811 /* SNTCommandStatus.m */; };
+		0D8868091AC48A1100B86659 /* SNTSystemInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D42D2B419D1D98A00955F08 /* SNTSystemInfo.m */; };
+		0D88680A1AC48A1200B86659 /* SNTSystemInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D42D2B419D1D98A00955F08 /* SNTSystemInfo.m */; };
+		0D88680C1AC48A1400B86659 /* SNTSystemInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D42D2B419D1D98A00955F08 /* SNTSystemInfo.m */; };
+		0D88680D1AC48A5D00B86659 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D3AFBF718FB4C870087BCEE /* IOKit.framework */; };
 		0D8C200C180F359A00CE2BF8 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0D8C200B180F359A00CE2BF8 /* Security.framework */; };
 		0D8E18CD19107B56000F89B8 /* SNTDaemonControlController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D8E18CC19107B56000F89B8 /* SNTDaemonControlController.m */; };
 		0D9A7F331759144800035EB5 /* SantaDriver.cc in Sources */ = {isa = PBXBuildFile; fileRef = 0D9A7F311759144800035EB5 /* SantaDriver.cc */; };
@@ -108,10 +112,14 @@
 		0DA73C9F1934F8100056D7C4 /* SNTLogging.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DA73C9E1934F8100056D7C4 /* SNTLogging.m */; };
 		0DA73CA11934F8100056D7C4 /* SNTLogging.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DA73C9E1934F8100056D7C4 /* SNTLogging.m */; };
 		0DA73CA21934F88D0056D7C4 /* SNTLogging.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DA73C9E1934F8100056D7C4 /* SNTLogging.m */; };
+		0DB390991AB1E11400614002 /* SNTCommandVersion.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DB390981AB1E11400614002 /* SNTCommandVersion.m */; };
+		0DB537871AFD36EB00487F92 /* SNTRuleTableTest.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DB537861AFD36EB00487F92 /* SNTRuleTableTest.m */; };
 		0DB8ACC1185662DC00FEF9C7 /* SNTApplication.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DB8ACC0185662DC00FEF9C7 /* SNTApplication.m */; };
 		0DC5D86D191AED220078A5C0 /* SNTRuleTable.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DC5D86C191AED220078A5C0 /* SNTRuleTable.m */; };
 		0DC5D86E191AED220078A5C0 /* SNTRuleTable.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DC5D86C191AED220078A5C0 /* SNTRuleTable.m */; };
 		0DC5D871192160180078A5C0 /* SNTCommandSyncLogUpload.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DC5D870192160180078A5C0 /* SNTCommandSyncLogUpload.m */; };
+		0DC765EA1B28D9EA00BAE651 /* santad in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0D9A7F3D1759330500035EB5 /* santad */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		0DC765EB1B28D9EA00BAE651 /* santactl in CopyFiles */ = {isa = PBXBuildFile; fileRef = 0D35BD9E18FD71CE00921A21 /* santactl */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		0DCA552718C95928002A7DAE /* SNTXPCConnection.m in Sources */ = {isa = PBXBuildFile; fileRef = 0D6FDC9518C93A020044685C /* SNTXPCConnection.m */; };
 		0DCD5FBF1909D64A006B445C /* SNTCommandBinaryInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DCD5FBE1909D64A006B445C /* SNTCommandBinaryInfo.m */; };
 		0DCD6042190ACCB8006B445C /* SNTFileInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DCD6041190ACCB8006B445C /* SNTFileInfo.m */; };
@@ -142,6 +150,13 @@
 		0DE50F6C19130358007B2B0C /* SNTStoredEvent.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DCD604A19105433006B445C /* SNTStoredEvent.m */; };
 		0DE50F6E191304E0007B2B0C /* SNTRule.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DE50F671912716A007B2B0C /* SNTRule.m */; };
 		0DE6788D1784A8C2007A9E52 /* SNTExecutionController.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DE6788C1784A8C2007A9E52 /* SNTExecutionController.m */; };
+		0DEFB7C01ACB28B000B92AAE /* SNTCommandSyncConstants.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DEFB7BF1ACB28B000B92AAE /* SNTCommandSyncConstants.m */; };
+		0DEFB7C41ACDD80100B92AAE /* SNTFileWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DEFB7C31ACDD80100B92AAE /* SNTFileWatcher.m */; };
+		0DEFB7C51ACDD80100B92AAE /* SNTFileWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DEFB7C31ACDD80100B92AAE /* SNTFileWatcher.m */; };
+		0DEFB7C61ACDE5F600B92AAE /* SNTFileWatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DEFB7C31ACDD80100B92AAE /* SNTFileWatcher.m */; };
+		0DEFB7C81ACF0BFE00B92AAE /* SNTFileWatcherTest.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DEFB7C71ACF0BFE00B92AAE /* SNTFileWatcherTest.m */; };
+		0DF395641AB76A7900CBC520 /* NSData+Zlib.m in Sources */ = {isa = PBXBuildFile; fileRef = 0DF395631AB76A7900CBC520 /* NSData+Zlib.m */; };
+		0DF395661AB76ABC00CBC520 /* libz.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 0DF395651AB76ABC00CBC520 /* libz.dylib */; };
 		4092327A1A51B66400A04527 /* SNTCommandRule.m in Sources */ = {isa = PBXBuildFile; fileRef = 409232791A51B65D00A04527 /* SNTCommandRule.m */; };
 		8BFD9B39112F4D16B3D0EFFB /* libPods-LogicTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 752301D17AA44BDE8B6D0541 /* libPods-LogicTests.a */; };
 		E86AE075D7F24FB88FB627C5 /* libPods-santad.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A84545E322F475FA0B505D5 /* libPods-santad.a */; };
@@ -190,7 +205,35 @@
 			remoteGlobalIDString = 0D9A7F3C1759330400035EB5;
 			remoteInfo = santad;
 		};
+		0DC765E51B28D9C600BAE651 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D91BCA8174E8A6500131A7D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0D9A7F3C1759330400035EB5;
+			remoteInfo = santad;
+		};
+		0DC765E71B28D9C600BAE651 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0D91BCA8174E8A6500131A7D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0D35BD9D18FD71CE00921A21;
+			remoteInfo = santactl;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0DC765E91B28D9CB00BAE651 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				0DC765EA1B28D9EA00BAE651 /* santad in CopyFiles */,
+				0DC765EB1B28D9EA00BAE651 /* santactl in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		0A84545E322F475FA0B505D5 /* libPods-santad.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-santad.a"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -241,8 +284,8 @@
 		0D385DEF180DE51600418BC6 /* SNTNotificationManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTNotificationManager.m; sourceTree = "<group>"; };
 		0D3AFBE618FB32CB0087BCEE /* SNTXPCConnectionTest.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTXPCConnectionTest.m; sourceTree = "<group>"; };
 		0D3AFBF718FB4C870087BCEE /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
-		0D4163FF191974F1006A356A /* SNTCommandSyncStatus.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTCommandSyncStatus.h; sourceTree = "<group>"; };
-		0D416400191974F1006A356A /* SNTCommandSyncStatus.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTCommandSyncStatus.m; sourceTree = "<group>"; };
+		0D4163FF191974F1006A356A /* SNTCommandSyncState.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTCommandSyncState.h; sourceTree = "<group>"; };
+		0D416400191974F1006A356A /* SNTCommandSyncState.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTCommandSyncState.m; sourceTree = "<group>"; };
 		0D41640319197AD7006A356A /* SNTCommandSyncEventUpload.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTCommandSyncEventUpload.h; sourceTree = "<group>"; };
 		0D41640419197AD7006A356A /* SNTCommandSyncEventUpload.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTCommandSyncEventUpload.m; sourceTree = "<group>"; };
 		0D41DAD31A7C28C800A890FE /* SNTEventTableTest.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTEventTableTest.m; sourceTree = "<group>"; };
@@ -288,6 +331,8 @@
 		0D9A7F411759330500035EB5 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; lineEnding = 0; path = main.m; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objc; };
 		0DA73C9E1934F8100056D7C4 /* SNTLogging.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTLogging.m; sourceTree = "<group>"; };
 		0DB2B92318085753001C01D9 /* santad-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "santad-Prefix.pch"; sourceTree = "<group>"; };
+		0DB390981AB1E11400614002 /* SNTCommandVersion.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = SNTCommandVersion.m; path = version/SNTCommandVersion.m; sourceTree = "<group>"; };
+		0DB537861AFD36EB00487F92 /* SNTRuleTableTest.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTRuleTableTest.m; sourceTree = "<group>"; };
 		0DB8ACBF185662DC00FEF9C7 /* SNTApplication.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTApplication.h; sourceTree = "<group>"; };
 		0DB8ACC0185662DC00FEF9C7 /* SNTApplication.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; lineEnding = 0; path = SNTApplication.m; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objc; };
 		0DB8ACE41858D73000FEF9C7 /* santad-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "santad-Info.plist"; sourceTree = "<group>"; };
@@ -317,6 +362,14 @@
 		0DE50F671912716A007B2B0C /* SNTRule.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTRule.m; sourceTree = "<group>"; };
 		0DE6788B1784A8C2007A9E52 /* SNTExecutionController.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTExecutionController.h; sourceTree = "<group>"; };
 		0DE6788C1784A8C2007A9E52 /* SNTExecutionController.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; lineEnding = 0; path = SNTExecutionController.m; sourceTree = "<group>"; xcLanguageSpecificationIdentifier = xcode.lang.objc; };
+		0DEFB7BF1ACB28B000B92AAE /* SNTCommandSyncConstants.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTCommandSyncConstants.m; sourceTree = "<group>"; };
+		0DEFB7C11ACB28BC00B92AAE /* SNTCommandSyncConstants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SNTCommandSyncConstants.h; sourceTree = "<group>"; };
+		0DEFB7C21ACDD80100B92AAE /* SNTFileWatcher.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SNTFileWatcher.h; sourceTree = "<group>"; };
+		0DEFB7C31ACDD80100B92AAE /* SNTFileWatcher.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTFileWatcher.m; sourceTree = "<group>"; };
+		0DEFB7C71ACF0BFE00B92AAE /* SNTFileWatcherTest.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SNTFileWatcherTest.m; sourceTree = "<group>"; };
+		0DF395621AB76A7900CBC520 /* NSData+Zlib.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSData+Zlib.h"; sourceTree = "<group>"; };
+		0DF395631AB76A7900CBC520 /* NSData+Zlib.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSData+Zlib.m"; sourceTree = "<group>"; };
+		0DF395651AB76ABC00CBC520 /* libz.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libz.dylib; path = usr/lib/libz.dylib; sourceTree = SDKROOT; };
 		13A4FE400F3857C0F5831498 /* Pods-LogicTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-LogicTests.debug.xcconfig"; path = "Pods/Target Support Files/Pods-LogicTests/Pods-LogicTests.debug.xcconfig"; sourceTree = "<group>"; };
 		409232791A51B65D00A04527 /* SNTCommandRule.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = SNTCommandRule.m; path = rule/SNTCommandRule.m; sourceTree = "<group>"; };
 		627BB4EC9917DC20E89D718C /* Pods-santad.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-santad.debug.xcconfig"; path = "Pods/Target Support Files/Pods-santad/Pods-santad.debug.xcconfig"; sourceTree = "<group>"; };
@@ -349,6 +402,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0DF395661AB76ABC00CBC520 /* libz.dylib in Frameworks */,
 				0DE4C8A118FEF28200466D04 /* Security.framework in Frameworks */,
 				0D35BDBD18FDA23600921A21 /* IOKit.framework in Frameworks */,
 				0D35BD9F18FD71CE00921A21 /* Foundation.framework in Frameworks */,
@@ -359,6 +413,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0D88680D1AC48A5D00B86659 /* IOKit.framework in Frameworks */,
 				0D6F12D819EC8822006B218E /* SecurityInterface.framework in Frameworks */,
 				0D8C200C180F359A00CE2BF8 /* Security.framework in Frameworks */,
 				0D385DB8180DE4A900418BC6 /* Cocoa.framework in Frameworks */,
@@ -397,6 +452,8 @@
 				0D41DAD31A7C28C800A890FE /* SNTEventTableTest.m */,
 				0DD0D490194F9947005F27EB /* SNTExecutionControllerTest.m */,
 				0DD0D48E194F78F8005F27EB /* SNTFileInfoTest.m */,
+				0DEFB7C71ACF0BFE00B92AAE /* SNTFileWatcherTest.m */,
+				0DB537861AFD36EB00487F92 /* SNTRuleTableTest.m */,
 				0D3AFBE618FB32CB0087BCEE /* SNTXPCConnectionTest.m */,
 			);
 			path = LogicTests;
@@ -419,14 +476,15 @@
 		0D35BDA018FD71CE00921A21 /* santactl */ = {
 			isa = PBXGroup;
 			children = (
-				409232751A51914400A04527 /* rule */,
 				0D35BDA118FD71CE00921A21 /* main.m */,
 				0D35BDAA18FD7CFD00921A21 /* SNTCommandController.h */,
 				0D35BDAB18FD7CFD00921A21 /* SNTCommandController.m */,
 				0DCD5FBC1909D4FD006B445C /* binaryinfo */,
 				0DE4C8A318FF3AFA00466D04 /* flushcache */,
+				409232751A51914400A04527 /* rule */,
 				0D827E6819DF4F3F006EC811 /* status */,
 				0D35BDB618FD84FC00921A21 /* sync */,
+				0DB390971AB1E0F200614002 /* version */,
 				0D35BDA318FD71CE00921A21 /* Resources */,
 			);
 			name = santactl;
@@ -445,9 +503,13 @@
 		0D35BDB618FD84FC00921A21 /* sync */ = {
 			isa = PBXGroup;
 			children = (
+				0DF395621AB76A7900CBC520 /* NSData+Zlib.h */,
+				0DF395631AB76A7900CBC520 /* NSData+Zlib.m */,
 				0DCD6060191188B1006B445C /* SNTAuthenticatingURLSession.h */,
 				0DCD6061191188B1006B445C /* SNTAuthenticatingURLSession.m */,
 				0D35BDB418FD84F600921A21 /* SNTCommandSync.m */,
+				0DEFB7C11ACB28BC00B92AAE /* SNTCommandSyncConstants.h */,
+				0DEFB7BF1ACB28B000B92AAE /* SNTCommandSyncConstants.m */,
 				0D41640319197AD7006A356A /* SNTCommandSyncEventUpload.h */,
 				0D41640419197AD7006A356A /* SNTCommandSyncEventUpload.m */,
 				0DC5D86F192160180078A5C0 /* SNTCommandSyncLogUpload.h */,
@@ -458,8 +520,8 @@
 				0DCD605B19117A90006B445C /* SNTCommandSyncPreflight.m */,
 				0D0A1EC1191998C900B8450F /* SNTCommandSyncRuleDownload.h */,
 				0D0A1EC2191998C900B8450F /* SNTCommandSyncRuleDownload.m */,
-				0D4163FF191974F1006A356A /* SNTCommandSyncStatus.h */,
-				0D416400191974F1006A356A /* SNTCommandSyncStatus.m */,
+				0D4163FF191974F1006A356A /* SNTCommandSyncState.h */,
+				0D416400191974F1006A356A /* SNTCommandSyncState.m */,
 				0D7FFD491A017D4B00F34435 /* SNTDERDecoder.h */,
 				0D7FFD4A1A017D4B00F34435 /* SNTDERDecoder.m */,
 			);
@@ -555,6 +617,7 @@
 		0D91BCB6174E8A7E00131A7D /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0DF395651AB76ABC00CBC520 /* libz.dylib */,
 				0DCD5F771909C659006B445C /* SecurityInterface.framework */,
 				0D3AFBF718FB4C870087BCEE /* IOKit.framework */,
 				0D8C200B180F359A00CE2BF8 /* Security.framework */,
@@ -599,6 +662,8 @@
 				0D10BE851A0AABD600C0C944 /* SNTDropRootPrivs.m */,
 				0DCD6040190ACCB8006B445C /* SNTFileInfo.h */,
 				0DCD6041190ACCB8006B445C /* SNTFileInfo.m */,
+				0DEFB7C21ACDD80100B92AAE /* SNTFileWatcher.h */,
+				0DEFB7C31ACDD80100B92AAE /* SNTFileWatcher.m */,
 				0D28E5E31926AFE400280F87 /* SNTKernelCommon.h */,
 				0D28E5E119269B3600280F87 /* SNTLogging.h */,
 				0DA73C9E1934F8100056D7C4 /* SNTLogging.m */,
@@ -659,6 +724,14 @@
 				0DC5D86C191AED220078A5C0 /* SNTRuleTable.m */,
 			);
 			name = DataLayer;
+			sourceTree = "<group>";
+		};
+		0DB390971AB1E0F200614002 /* version */ = {
+			isa = PBXGroup;
+			children = (
+				0DB390981AB1E11400614002 /* SNTCommandVersion.m */,
+			);
+			name = version;
 			sourceTree = "<group>";
 		};
 		0DCD5FBC1909D4FD006B445C /* binaryinfo */ = {
@@ -792,10 +865,13 @@
 				0DD98E691A5DD5C900A754C6 /* Update Module Version */,
 				0D91BCAE174E8A7E00131A7D /* Sources */,
 				0D91BCB0174E8A7E00131A7D /* Headers */,
+				0DC765E91B28D9CB00BAE651 /* CopyFiles */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				0DC765E61B28D9C600BAE651 /* PBXTargetDependency */,
+				0DC765E81B28D9C600BAE651 /* PBXTargetDependency */,
 			);
 			name = "santa-driver";
 			productName = "santa-driver";
@@ -1052,6 +1128,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0D88680C1AC48A1400B86659 /* SNTSystemInfo.m in Sources */,
 				0D63DD5E1906FCB400D346C4 /* SNTDatabaseController.m in Sources */,
 				0D3AFBF018FB4C6C0087BCEE /* SNTDriverManager.m in Sources */,
 				0DCD6044190ACCB8006B445C /* SNTFileInfo.m in Sources */,
@@ -1060,10 +1137,13 @@
 				0DD0D491194F9947005F27EB /* SNTExecutionControllerTest.m in Sources */,
 				0D3AFBEF18FB4C6C0087BCEE /* SNTExecutionController.m in Sources */,
 				0D3AFBEC18FB48E70087BCEE /* SNTEventTable.m in Sources */,
+				0DB537871AFD36EB00487F92 /* SNTRuleTableTest.m in Sources */,
 				0DCD604D19105433006B445C /* SNTStoredEvent.m in Sources */,
 				0DCD605819115E57006B445C /* SNTXPCControlInterface.m in Sources */,
 				0D10BE891A0AAF6700C0C944 /* SNTDropRootPrivs.m in Sources */,
+				0DEFB7C61ACDE5F600B92AAE /* SNTFileWatcher.m in Sources */,
 				0D10BE8B1A0AB23300C0C944 /* SNTDERDecoderTest.m in Sources */,
+				0DEFB7C81ACF0BFE00B92AAE /* SNTFileWatcherTest.m in Sources */,
 				0DD0D48B194F6193005F27EB /* SNTCertificateTest.m in Sources */,
 				0D28D53819D9F5910015C5EB /* SNTConfigurator.m in Sources */,
 				0D3AFBE718FB32CB0087BCEE /* SNTXPCConnectionTest.m in Sources */,
@@ -1090,6 +1170,7 @@
 				0D35BDC218FDA5D100921A21 /* SNTCodesignChecker.m in Sources */,
 				0D35BDB518FD84F600921A21 /* SNTCommandSync.m in Sources */,
 				0DCD5FBF1909D64A006B445C /* SNTCommandBinaryInfo.m in Sources */,
+				0DEFB7C01ACB28B000B92AAE /* SNTCommandSyncConstants.m in Sources */,
 				0DCD6062191188B1006B445C /* SNTAuthenticatingURLSession.m in Sources */,
 				0DCD605619115D17006B445C /* SNTXPCControlInterface.m in Sources */,
 				0DE50F6C19130358007B2B0C /* SNTStoredEvent.m in Sources */,
@@ -1097,16 +1178,18 @@
 				0DCD605C19117A90006B445C /* SNTCommandSyncPreflight.m in Sources */,
 				0D41640519197AD7006A356A /* SNTCommandSyncEventUpload.m in Sources */,
 				0D42D2B919D2042900955F08 /* SNTConfigurator.m in Sources */,
+				0DF395641AB76A7900CBC520 /* NSData+Zlib.m in Sources */,
 				0D10BE871A0AABD600C0C944 /* SNTDropRootPrivs.m in Sources */,
 				0DE4C8A618FF3B1700466D04 /* SNTCommandFlushCache.m in Sources */,
 				4092327A1A51B66400A04527 /* SNTCommandRule.m in Sources */,
-				0D416401191974F1006A356A /* SNTCommandSyncStatus.m in Sources */,
+				0D416401191974F1006A356A /* SNTCommandSyncState.m in Sources */,
 				0DC5D871192160180078A5C0 /* SNTCommandSyncLogUpload.m in Sources */,
 				0D35BDA218FD71CE00921A21 /* main.m in Sources */,
 				0DCD6043190ACCB8006B445C /* SNTFileInfo.m in Sources */,
 				0DE50F6E191304E0007B2B0C /* SNTRule.m in Sources */,
 				0D0A1EC3191998C900B8450F /* SNTCommandSyncRuleDownload.m in Sources */,
 				0D35BDC018FDA5C800921A21 /* SNTCertificate.m in Sources */,
+				0DB390991AB1E11400614002 /* SNTCommandVersion.m in Sources */,
 				0D42D2B519D1D98A00955F08 /* SNTSystemInfo.m in Sources */,
 				0D827E6719DF3C74006EC811 /* SNTCommandStatus.m in Sources */,
 				0D0A1EC6191AB9B000B8450F /* SNTCommandSyncPostflight.m in Sources */,
@@ -1122,6 +1205,7 @@
 				0D54E0B11976F8D3000BB59F /* SNTFileInfo.m in Sources */,
 				0DCA552718C95928002A7DAE /* SNTXPCConnection.m in Sources */,
 				0D385DF1180DE51600418BC6 /* SNTAppDelegate.m in Sources */,
+				0D88680A1AC48A1200B86659 /* SNTSystemInfo.m in Sources */,
 				0DCD605119115A06006B445C /* SNTXPCNotifierInterface.m in Sources */,
 				0D827E6519DF392E006EC811 /* SNTConfigurator.m in Sources */,
 				0D385DF2180DE51600418BC6 /* SNTMessageWindowController.m in Sources */,
@@ -1132,6 +1216,7 @@
 				0D1B477019A53419008CADD3 /* SNTAboutWindowController.m in Sources */,
 				0D668E8118D1121700E29A8B /* SNTMessageWindow.m in Sources */,
 				0DA73CA11934F8100056D7C4 /* SNTLogging.m in Sources */,
+				0DEFB7C51ACDD80100B92AAE /* SNTFileWatcher.m in Sources */,
 				0D20710E1A7C4A86008B0A9A /* SNTStoredEvent.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1151,6 +1236,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0D8868091AC48A1100B86659 /* SNTSystemInfo.m in Sources */,
 				0DE6788D1784A8C2007A9E52 /* SNTExecutionController.m in Sources */,
 				0D10BE861A0AABD600C0C944 /* SNTDropRootPrivs.m in Sources */,
 				0D63DD5C1906FCB400D346C4 /* SNTDatabaseController.m in Sources */,
@@ -1160,6 +1246,7 @@
 				0D1AF477187C7A2C00D3298D /* SNTCertificate.m in Sources */,
 				0DA73C9F1934F8100056D7C4 /* SNTLogging.m in Sources */,
 				0DCD6042190ACCB8006B445C /* SNTFileInfo.m in Sources */,
+				0DEFB7C41ACDD80100B92AAE /* SNTFileWatcher.m in Sources */,
 				0DC5D86D191AED220078A5C0 /* SNTRuleTable.m in Sources */,
 				0D7D01871774F93A005DBAB4 /* SNTDriverManager.m in Sources */,
 				0D8E18CD19107B56000F89B8 /* SNTDaemonControlController.m in Sources */,
@@ -1207,6 +1294,16 @@
 			target = 0D9A7F3C1759330400035EB5 /* santad */;
 			targetProxy = 0D9A7F591759393600035EB5 /* PBXContainerItemProxy */;
 		};
+		0DC765E61B28D9C600BAE651 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0D9A7F3C1759330400035EB5 /* santad */;
+			targetProxy = 0DC765E51B28D9C600BAE651 /* PBXContainerItemProxy */;
+		};
+		0DC765E81B28D9C600BAE651 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0D35BD9D18FD71CE00921A21 /* santactl */;
+			targetProxy = 0DC765E71B28D9C600BAE651 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -1239,8 +1336,10 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE = "";
+				WARNING_CFLAGS = "";
 			};
 			name = Debug;
 		};
@@ -1267,8 +1366,10 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INSTALL_PATH = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE = "";
+				WARNING_CFLAGS = "";
 			};
 			name = Release;
 		};
@@ -1277,7 +1378,6 @@
 			baseConfigurationReference = 13A4FE400F3857C0F5831498 /* Pods-LogicTests.debug.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				BUNDLE_LOADER = "$(BUILT_PRODUCTS_DIR)/Santa.app/Contents/MacOS/Santa";
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
@@ -1318,6 +1418,7 @@
 				);
 				INFOPLIST_FILE = "Tests/LogicTests/Resources/Tests-Info.plist";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				WARNING_CFLAGS = "";
 				WRAPPER_EXTENSION = xctest;
 			};
 			name = Debug;
@@ -1327,7 +1428,6 @@
 			baseConfigurationReference = BE74E23CF5A553E5F02462B9 /* Pods-LogicTests.release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				BUNDLE_LOADER = "$(BUILT_PRODUCTS_DIR)/Santa.app/Contents/MacOS/Santa";
 				CLANG_ENABLE_OBJC_ARC = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
@@ -1362,6 +1462,7 @@
 				);
 				INFOPLIST_FILE = "Tests/LogicTests/Resources/Tests-Info.plist";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				WARNING_CFLAGS = "";
 				WRAPPER_EXTENSION = xctest;
 			};
 			name = Release;
@@ -1372,6 +1473,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -1399,6 +1501,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "${DERIVED_FILE_DIR}/santactl-Info.plist";
+				INSTALL_PATH = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE = "";
 			};
@@ -1410,6 +1513,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -1431,6 +1535,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "${DERIVED_FILE_DIR}/santactl-Info.plist";
+				INSTALL_PATH = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE = "";
 			};
@@ -1443,6 +1548,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = NO;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -1483,6 +1589,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = NO;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_BOOL_CONVERSION = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
@@ -1522,6 +1629,11 @@
 				PROVISIONING_PROFILE = "";
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
+				WARNING_CFLAGS = (
+					"-Wall",
+					"-Wextra",
+					"-Wno-unused-parameter",
+				);
 			};
 			name = Debug;
 		};
@@ -1537,6 +1649,11 @@
 				PROVISIONING_PROFILE = "";
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = macosx;
+				WARNING_CFLAGS = (
+					"-Wall",
+					"-Wextra",
+					"-Wno-unused-parameter",
+				);
 			};
 			name = Release;
 		};
@@ -1545,12 +1662,14 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
@@ -1569,7 +1688,10 @@
 				OTHER_LDFLAGS = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				WARNING_CFLAGS = "-Wno-deprecated-register";
+				WARNING_CFLAGS = (
+					"-Wno-deprecated-register",
+					"$(inherit)",
+				);
 				WRAPPER_EXTENSION = kext;
 			};
 			name = Debug;
@@ -1579,12 +1701,14 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COMBINE_HIDPI_IMAGES = YES;
+				COPY_PHASE_STRIP = NO;
 				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREPROCESSOR_DEFINITIONS = "";
@@ -1599,7 +1723,10 @@
 				MODULE_VERSION = TO.BE.FILLED;
 				OTHER_LDFLAGS = "";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				WARNING_CFLAGS = "-Wno-deprecated-register";
+				WARNING_CFLAGS = (
+					"-Wno-deprecated-register",
+					"$(inherit)",
+				);
 				WRAPPER_EXTENSION = kext;
 			};
 			name = Release;
@@ -1624,6 +1751,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
@@ -1646,7 +1774,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "${DERIVED_FILE_DIR}/santad-Info.plist";
-				INSTALL_PATH = /usr/sbin;
+				INSTALL_PATH = "";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -1658,6 +1786,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_STATIC_ANALYZER_MODE = deep;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
@@ -1673,7 +1802,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INFOPLIST_FILE = "${DERIVED_FILE_DIR}/santad-Info.plist";
-				INSTALL_PATH = /usr/sbin;
+				INSTALL_PATH = "";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};

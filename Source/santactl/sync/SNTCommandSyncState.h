@@ -14,14 +14,18 @@
 
 /// An instance of this class is passed to each stage of the sync process for storing data
 /// that might be needed in later stages.
-@interface SNTCommandSyncStatus : NSObject
+@interface SNTCommandSyncState : NSObject
 
 /// The base API URL
 @property NSURL *syncBaseURL;
 
 /// Machine identifier and owner
-@property NSString *machineID;
-@property NSString *machineOwner;
+@property(copy) NSString *machineID;
+@property(copy) NSString *machineOwner;
+
+/// Clean sync flag, sent from server. If True, all existing rules
+/// should be deleted before inserting any new rules.
+@property BOOL cleanSync;
 
 /// Batch size for uploading events, sent from server
 @property int32_t eventBatchSize;

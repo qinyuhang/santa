@@ -17,7 +17,8 @@
 #include "SNTKernelCommon.h"
 #include "SNTLogging.h"
 
-#import "SNTCommandSyncStatus.h"
+#import "SNTCommandSyncConstants.h"
+#import "SNTCommandSyncState.h"
 #import "SNTSystemInfo.h"
 #import "SNTXPCConnection.h"
 #import "SNTXPCControlInterface.h"
@@ -25,20 +26,23 @@
 @implementation SNTCommandSyncPreflight
 
 + (void)performSyncInSession:(NSURLSession *)session
-                    progress:(SNTCommandSyncStatus *)progress
+                   syncState:(SNTCommandSyncState *)syncState
                   daemonConn:(SNTXPCConnection *)daemonConn
            completionHandler:(void (^)(BOOL success))handler {
-  NSURL *url = [NSURL URLWithString:[@"preflight/" stringByAppendingString:progress.machineID]
-                      relativeToURL:progress.syncBaseURL];
+  NSURL *url = [NSURL URLWithString:[kURLPreflight stringByAppendingString:syncState.machineID]
+                      relativeToURL:syncState.syncBaseURL];
 
   NSMutableDictionary *requestDict = [NSMutableDictionary dictionary];
-  requestDict[@"serial_no"] = [SNTSystemInfo serialNumber];
-  requestDict[@"hostname"] = [SNTSystemInfo shortHostname];
-  requestDict[@"santa_version"] =
-      [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-  requestDict[@"os_version"] = [SNTSystemInfo osVersion];
-  requestDict[@"os_build"] = [SNTSystemInfo osBuild];
-  requestDict[@"primary_user"] = progress.machineOwner;
+  requestDict[kSerialNumber] = [SNTSystemInfo serialNumber];
+  requestDict[kHostname] = [SNTSystemInfo shortHostname];
+  requestDict[kSantaVer] = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+  requestDict[kOSVer] = [SNTSystemInfo osVersion];
+  requestDict[kOSBuild] = [SNTSystemInfo osBuild];
+  requestDict[kPrimaryUser] = syncState.machineOwner;
+
+  if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--clean"]) {
+    requestDict[kRequestCleanSync] = @YES;
+  }
 
   NSData *requestBody = [NSJSONSerialization dataWithJSONObject:requestDict
                                                         options:0
@@ -53,17 +57,28 @@
                                                         NSError *error) {
       long statusCode = [(NSHTTPURLResponse *)response statusCode];
       if (statusCode != 200) {
-        LOGD(@"HTTP Response: %@",
+        LOGE(@"HTTP Response: %ld %@",
+             statusCode,
              [[NSHTTPURLResponse localizedStringForStatusCode:statusCode] capitalizedString]);
         handler(NO);
       } else {
         NSDictionary *r = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
 
-        progress.eventBatchSize = [r[@"batch_size"] intValue];
-        progress.uploadLogURL = [NSURL URLWithString:r[@"upload_logs_url"]];
+        syncState.eventBatchSize = [r[kBatchSize] intValue];
+        syncState.uploadLogURL = [NSURL URLWithString:r[kUploadLogsURL]];
 
-        if (r[@"client_mode"]) {
-          [[daemonConn remoteObjectProxy] setClientMode:[r[@"client_mode"] intValue] withReply:^{}];
+        if ([r[kClientMode] isEqual:kClientModeMonitor]) {
+            [[daemonConn remoteObjectProxy] setClientMode:CLIENTMODE_MONITOR reply:^{}];
+        } else if ([r[kClientMode] isEqual:kClientModeLockdown]) {
+            [[daemonConn remoteObjectProxy] setClientMode:CLIENTMODE_LOCKDOWN reply:^{}];
+        }
+
+        if ([r[kWhitelistRegex] isKindOfClass:[NSString class]]) {
+          [[daemonConn remoteObjectProxy] setWhitelistPathRegex:r[kWhitelistRegex] reply:^{}];
+        }
+
+        if ([r[kCleanSync] boolValue]) {
+          syncState.cleanSync = YES;
         }
 
         handler(YES);

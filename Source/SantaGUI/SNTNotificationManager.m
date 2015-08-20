@@ -54,8 +54,15 @@
 
 - (void)postBlockNotification:(SNTStoredEvent *)event withCustomMessage:(NSString *)message {
   // See if this binary is already in the list of pending notifications.
-  NSPredicate *predicate = [NSPredicate predicateWithFormat:@"fileSHA256==%@", event.fileSHA256];
+  NSPredicate *predicate =
+      [NSPredicate predicateWithFormat:@"event.fileSHA256==%@", event.fileSHA256];
   if ([[self.pendingNotifications filteredArrayUsingPredicate:predicate] count]) return;
+
+  if (!event) {
+    NSLog(@"Error: Missing event object in message received from daemon!");
+    return;
+  }
+  if (!message) message = (NSString *)[NSNull null];
 
   // Notifications arrive on a background thread but UI updates must happen on the main thread.
   // This includes making windows.

@@ -15,7 +15,6 @@
 #import "SNTAuthenticatingURLSession.h"
 
 #import "SNTCertificate.h"
-#import "SNTConfigurator.h"
 #import "SNTDERDecoder.h"
 #import "SNTLogging.h"
 
@@ -32,7 +31,7 @@
 }
 
 - (instancetype)init {
-  NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+  NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
   [config setTLSMinimumSupportedProtocol:kTLSProtocol12];
   [config setHTTPShouldUsePipelining:YES];
   return [self initWithSessionConfiguration:config];
@@ -59,24 +58,24 @@
   NSURLProtectionSpace *protectionSpace = challenge.protectionSpace;
 
   if (challenge.previousFailureCount > 0) {
-    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+    completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
     return;
   }
 
   if (self.serverHostname && ![self.serverHostname isEqual:protectionSpace.host]) {
-    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+    completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
     return;
   }
 
   if (![protectionSpace.protocol isEqual:NSURLProtectionSpaceHTTPS]) {
-    LOGD(@"Protection Space: %@ is not a secure protocol", protectionSpace.protocol);
-    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+    LOGE(@"%@ is not a secure protocol", protectionSpace.protocol);
+    completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
     return;
   }
 
   if (!protectionSpace.receivesCredentialSecurely) {
-    LOGD(@"Protection Space: secure authentication or protocol cannot be established.");
-    completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+    LOGE(@"Secure authentication or protocol cannot be established.");
+    completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
     return;
   }
 
@@ -89,7 +88,7 @@
       return;
     } else {
       LOGE(@"Server asked for client authentication but no usable client certificate found.");
-      completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
       return;
     }
   } else if (authMethod == NSURLAuthenticationMethodServerTrust) {
@@ -98,13 +97,27 @@
       completionHandler(NSURLSessionAuthChallengeUseCredential, cred);
       return;
     } else {
-      LOGE(@"Server asked for client authentication but no usable client certificate found.");
-      completionHandler(NSURLSessionAuthChallengeRejectProtectionSpace, nil);
+      LOGE(@"Unable to verify server identity.");
+      completionHandler(NSURLSessionAuthChallengeCancelAuthenticationChallenge, nil);
       return;
     }
   }
 
   completionHandler(NSURLSessionAuthChallengePerformDefaultHandling, nil);
+}
+
+- (void)URLSession:(NSURLSession *)session
+                          task:(NSURLSessionTask *)task
+    willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+                    newRequest:(NSURLRequest *)request
+             completionHandler:(void (^)(NSURLRequest *))completionHandler {
+    if (self.refusesRedirects) {
+      LOGD(@"Rejected redirection to: %@", request.URL);
+      [task cancel];  // without this, the connection hangs until timeout!?!
+      completionHandler(NULL);
+    } else {
+      completionHandler(request);
+    }
 }
 
 #pragma mark Private Helpers for URLSession:didReceiveChallenge:completionHandler:
@@ -125,13 +138,13 @@
 ///
 - (NSURLCredential *)clientCredentialForProtectionSpace:(NSURLProtectionSpace *)protectionSpace {
   __block OSStatus err = errSecSuccess;
-  __block SecIdentityRef foundIdentity;
+  __block SecIdentityRef foundIdentity = NULL;
 
   if (self.clientCertFile) {
     NSError *error;
     NSData *data = [NSData dataWithContentsOfFile:self.clientCertFile options:0 error:&error];
     if (error) {
-      LOGE(@"Client Trust: Couldn't open client certificate %@: %@",
+      LOGD(@"Client Trust: Couldn't open client certificate %@: %@",
            self.clientCertFile,
            [error localizedDescription]);
       return nil;
@@ -147,17 +160,19 @@
     NSArray *identities = CFBridgingRelease(cfIdentities);
 
     if (err != errSecSuccess) {
-      LOGE(@"Client Trust: Couldn't load client certificate %@: %d", self.clientCertFile, err);
+      LOGD(@"Client Trust: Couldn't load client certificate %@: %d", self.clientCertFile, err);
       return nil;
     }
 
     foundIdentity = (__bridge SecIdentityRef)identities[0][(__bridge id)kSecImportItemIdentity];
+    CFRetain(foundIdentity);
   } else {
     CFArrayRef cfIdentities;
     err = SecItemCopyMatching((__bridge CFDictionaryRef)@{
           (id)kSecClass : (id)kSecClassIdentity,
           (id)kSecReturnRef : @YES,
-          (id)kSecMatchLimit : (id)kSecMatchLimitAll }, (CFTypeRef *)&cfIdentities);
+          (id)kSecMatchLimit : (id)kSecMatchLimitAll
+    }, (CFTypeRef *)&cfIdentities);
 
     if (err != errSecSuccess) {
       LOGD(@"Client Trust: Failed to load client identities, SecItemCopyMatching returned: %d",
@@ -169,56 +184,69 @@
 
     // Manually iterate through available identities to find one with an allowed issuer.
     [identities enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-      SecIdentityRef identityRef = (__bridge SecIdentityRef)obj;
+        SecIdentityRef identityRef = (__bridge SecIdentityRef)obj;
 
-      SecCertificateRef certificate = NULL;
-      err = SecIdentityCopyCertificate(identityRef, &certificate);
-      if (err != errSecSuccess) {
-        LOGD(@"Client Trust: Failed to read certificate data: %d. Skipping identity.", (int)err);
-        return;
-      }
-
-      SNTCertificate *clientCert = [[SNTCertificate alloc] initWithSecCertificateRef:certificate];
-      CFRelease(certificate);
-
-      // Switch identity finding method depending on config
-      if (self.clientCertCommonName && clientCert.commonName) {
-        if ([clientCert.commonName compare:self.clientCertCommonName
-                                   options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-          foundIdentity = identityRef;
-          *stop = YES;
-          return;  // return from enumeration block
+        SecCertificateRef certificate = NULL;
+        err = SecIdentityCopyCertificate(identityRef, &certificate);
+        if (err != errSecSuccess) {
+          LOGD(@"Client Trust: Failed to read certificate data: %d. Skipping identity.", (int)err);
+          return;
         }
-      } else if (self.clientCertIssuerCn && clientCert.issuerCommonName) {
-        if ([clientCert.issuerCommonName compare:self.clientCertIssuerCn
-                                         options:NSCaseInsensitiveSearch] == NSOrderedSame) {
-          foundIdentity = identityRef;
-          *stop = YES;
-          return;  // return from enumeration block
-        }
-      } else {
-        for (NSData *allowedIssuer in protectionSpace.distinguishedNames) {
-          SNTDERDecoder *decoder = [[SNTDERDecoder alloc] initWithData:allowedIssuer];
-          if (!decoder) continue;
-          if ([clientCert.issuerCommonName isEqual:decoder.commonName] &&
-              [clientCert.issuerCountryName isEqual:decoder.countryName] &&
-              [clientCert.issuerOrgName isEqual:decoder.organizationName] &&
-              [clientCert.issuerOrgUnit isEqual:decoder.organizationalUnit]) {
 
+        SNTCertificate *clientCert = [[SNTCertificate alloc] initWithSecCertificateRef:certificate];
+        CFRelease(certificate);
+
+        // Switch identity finding method depending on config
+        if (self.clientCertCommonName && clientCert.commonName) {
+          if ([clientCert.commonName compare:self.clientCertCommonName
+                                     options:NSCaseInsensitiveSearch] == NSOrderedSame) {
             foundIdentity = identityRef;
+            CFRetain(foundIdentity);
             *stop = YES;
             return;  // return from enumeration block
           }
+        } else if (self.clientCertIssuerCn && clientCert.issuerCommonName) {
+          if ([clientCert.issuerCommonName compare:self.clientCertIssuerCn
+                                           options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+            foundIdentity = identityRef;
+            CFRetain(foundIdentity);
+            *stop = YES;
+            return;  // return from enumeration block
+          }
+        } else {
+          for (NSData *allowedIssuer in protectionSpace.distinguishedNames) {
+            SNTDERDecoder *decoder = [[SNTDERDecoder alloc] initWithData:allowedIssuer];
+
+            if (!decoder) {
+              LOGW(@"Unable to decode allowed distinguished name.");
+              continue;
+            }
+
+            if ([clientCert.issuerCommonName isEqual:decoder.commonName] &&
+                [clientCert.issuerCountryName isEqual:decoder.countryName] &&
+                [clientCert.issuerOrgName isEqual:decoder.organizationName] &&
+                [clientCert.issuerOrgUnit isEqual:decoder.organizationalUnit]) {
+              foundIdentity = identityRef;
+              CFRetain(foundIdentity);
+              *stop = YES;
+              return;  // return from enumeration block
+            }
+          }
         }
-      }
     }];
   }
 
   if (foundIdentity) {
-    LOGD(@"Client Trust: Valid client identity %@.", foundIdentity);
-    return [NSURLCredential credentialWithIdentity:foundIdentity
-                                      certificates:nil
-                                       persistence:NSURLCredentialPersistenceForSession];
+    SecCertificateRef certificate = NULL;
+    err = SecIdentityCopyCertificate(foundIdentity, &certificate);
+    SNTCertificate *clientCert = [[SNTCertificate alloc] initWithSecCertificateRef:certificate];
+    LOGD(@"Client Trust: Valid client identity %@.", clientCert);
+    NSURLCredential *cred =
+        [NSURLCredential credentialWithIdentity:foundIdentity
+                                   certificates:nil
+                                    persistence:NSURLCredentialPersistenceForSession];
+    CFRelease(foundIdentity);
+    return cred;
   } else {
     LOGD(@"Client Trust: No valid identity found.");
     return nil;
@@ -260,7 +288,7 @@
     // Set this array of certs as the anchors to trust.
     err = SecTrustSetAnchorCertificates(serverTrust, (__bridge CFArrayRef)certRefs);
     if (err != errSecSuccess) {
-      LOGE(@"Server Trust: Could not set anchor certificates: %d", err);
+      LOGD(@"Server Trust: Could not set anchor certificates: %d", err);
       return nil;
     }
   }
@@ -269,12 +297,12 @@
   SecTrustResultType result = kSecTrustResultInvalid;
   err = SecTrustEvaluate(serverTrust, &result);
   if (err != errSecSuccess) {
-    LOGE(@"Server Trust: Unable to evaluate certificate chain for server: %d", err);
+    LOGD(@"Server Trust: Unable to evaluate certificate chain for server: %d", err);
     return nil;
   }
 
   // Print details about the server's leaf certificate.
-  SecCertificateRef firstCert = SecTrustGetCertificateAtIndex(protectionSpace.serverTrust, 0);
+  SecCertificateRef firstCert = SecTrustGetCertificateAtIndex(serverTrust, 0);
   if (firstCert) {
     SNTCertificate *cert = [[SNTCertificate alloc] initWithSecCertificateRef:firstCert];
     LOGD(@"Server Trust: Server leaf cert: %@", cert);
@@ -283,7 +311,7 @@
   // Having a trust level "unspecified" by the user is the usual result, described at
   // https://developer.apple.com/library/mac/qa/qa1360
   if (result != kSecTrustResultProceed && result != kSecTrustResultUnspecified) {
-    LOGE(@"Server Trust: Server isn't trusted. SecTrustResultType: %d", result);
+    LOGD(@"Server Trust: Server isn't trusted. SecTrustResultType: %d", result);
     return nil;
   }
 

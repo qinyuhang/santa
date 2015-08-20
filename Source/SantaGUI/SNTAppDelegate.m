@@ -15,11 +15,14 @@
 #import "SNTAppDelegate.h"
 
 #import "SNTAboutWindowController.h"
+#import "SNTConfigurator.h"
+#import "SNTFileWatcher.h"
 #import "SNTNotificationManager.h"
 #import "SNTXPCConnection.h"
 
 @interface SNTAppDelegate ()
 @property SNTAboutWindowController *aboutWindowController;
+@property SNTFileWatcher *configFileWatcher;
 @property SNTNotificationManager *notificationManager;
 @property SNTXPCConnection *listener;
 @end
@@ -30,7 +33,12 @@
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
   [self setupMenu];
-  self.aboutWindowController = [[SNTAboutWindowController alloc] init];
+
+  self.configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath
+                                                            handler:^{
+      [[SNTConfigurator configurator] reloadConfigData];
+  }];
+
   self.notificationManager = [[SNTNotificationManager alloc] init];
 
   NSNotificationCenter *workspaceNotifications = [[NSWorkspace sharedWorkspace] notificationCenter];
@@ -47,6 +55,7 @@
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+  self.aboutWindowController = [[SNTAboutWindowController alloc] init];
   [self.aboutWindowController showWindow:self];
   return NO;
 }
@@ -56,14 +65,12 @@
 - (void)createConnection {
   __weak __typeof(self) weakSelf = self;
 
-  self.listener =
-      [[SNTXPCConnection alloc] initClientWithName:[SNTXPCNotifierInterface serviceId]
-                                           options:NSXPCConnectionPrivileged];
+  self.listener = [[SNTXPCConnection alloc] initClientWithName:[SNTXPCNotifierInterface serviceId]
+                                                       options:NSXPCConnectionPrivileged];
   self.listener.exportedInterface = [SNTXPCNotifierInterface notifierInterface];
   self.listener.exportedObject = self.notificationManager;
   self.listener.rejectedHandler = ^{
-      [weakSelf performSelectorInBackground:@selector(attemptReconnection)
-                                 withObject:nil];
+      [weakSelf attemptReconnection];
   };
   self.listener.invalidationHandler = self.listener.rejectedHandler;
   [self.listener resume];
@@ -73,15 +80,12 @@
   self.listener.invalidationHandler = nil;
   [self.listener invalidate];
   self.listener = nil;
-  NSLog(@"KILLING CONNECTION");
 }
 
 - (void)attemptReconnection {
   // TODO(rah): Make this smarter.
   sleep(10);
-  [self performSelectorOnMainThread:@selector(createConnection)
-                         withObject:nil
-                      waitUntilDone:NO];
+  [self performSelectorOnMainThread:@selector(createConnection) withObject:nil waitUntilDone:NO];
 }
 
 #pragma mark Menu Management

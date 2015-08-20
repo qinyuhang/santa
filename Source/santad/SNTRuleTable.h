@@ -27,17 +27,17 @@
 ///
 ///  @return Number of rules in the database
 ///
-- (long)ruleCount;
+- (NSUInteger)ruleCount;
 
 ///
 ///  @return Number of binary rules in the database
 ///
-- (long)binaryRuleCount;
+- (NSUInteger)binaryRuleCount;
 
 ///
 ///  @return Number of certificate rules in the database
 ///
-- (long)certificateRuleCount;
+- (NSUInteger)certificateRuleCount;
 
 ///
 ///  @return Rule for binary with given SHA-256
@@ -54,8 +54,9 @@
 ///  transaction will abort if any rule fails to add.
 ///
 ///  @param rules Array of SNTRule's to add.
+///  @param cleanSlate If true, remove all rules before adding the new rules.
 ///  @return YES if all rules were added successfully.
 ///
-- (BOOL)addRules:(NSArray *)rules;
+- (BOOL)addRules:(NSArray *)rules cleanSlate:(BOOL)cleanSlate;
 
 @end

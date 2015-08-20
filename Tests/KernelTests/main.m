@@ -29,23 +29,30 @@
 ///
 
 #define TSTART(testName) \
-    printf("   %-50s ", testName);
+    do { printf("   %-50s ", testName); } while (0)
 #define TPASS() \
-    printf("\x1b[32mPASS\x1b[0m\n");
+    do { printf("\x1b[32mPASS\x1b[0m\n"); } while (0)
 #define TPASSINFO(fmt, ...) \
-    printf("\x1b[32mPASS\x1b[0m\n      " fmt "\n", ##__VA_ARGS__);
+    do { printf("\x1b[32mPASS\x1b[0m\n      " fmt "\n", ##__VA_ARGS__); } while (0)
 #define TFAIL() \
-    printf("\x1b[31mFAIL\x1b[0m\n"); \
-    exit(1);
+    do { \
+      printf("\x1b[31mFAIL\x1b[0m\n"); \
+      exit(1); \
+    } while (0)
 #define TFAILINFO(fmt, ...) \
-    printf("\x1b[31mFAIL\x1b[0m\n   -> " fmt "\n\nTest failed.\n\n", ##__VA_ARGS__); \
-    exit(1);
+    do { \
+      printf("\x1b[31mFAIL\x1b[0m\n   -> " fmt "\n\nTest failed.\n\n", ##__VA_ARGS__); \
+      exit(1); \
+    } while (0)
 
 @interface SantaKernelTests : NSObject
 @property io_connect_t connection;
 @property int timesSeenLs;
 @property int timesSeenCat;
 @property int timesSeenCp;
+
+@property int testExeIteration;
+@property int timesSeenTestExeIteration;
 - (void)runTests;
 @end
 
@@ -60,16 +67,15 @@
   t.standardInput = nil;
   t.standardOutput = nil;
   t.standardError = nil;
-
   return t;
 }
 
 - (NSString *)sha256ForPath:(NSString *)path {
   unsigned char sha256[CC_SHA256_DIGEST_LENGTH];
-  NSData *psData = [NSData dataWithContentsOfFile:path
-                                          options:NSDataReadingMappedIfSafe
-                                            error:nil];
-  CC_SHA256([psData bytes], (unsigned int)[psData length], sha256);
+  NSData *fData = [NSData dataWithContentsOfFile:path
+                                         options:NSDataReadingMappedIfSafe
+                                           error:nil];
+  CC_SHA256([fData bytes], (unsigned int)[fData length], sha256);
   char buf[CC_SHA256_DIGEST_LENGTH * 2 + 1];
   for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
     snprintf(buf + (2*i), 4, "%02x", (unsigned char)sha256[i]);
@@ -80,8 +86,8 @@
 
 #pragma mark - Driver Helpers
 
-/// Call in-kernel function: |kSantaUserClientReceive| passing the |action| and |vnodeId| via a
-/// |santa_message_t| struct.
+/// Call in-kernel function: |kSantaUserClientAllowBinary| or |kSantaUserClientDenyBinary|
+/// passing the |vnodeID|.
 - (void)postToKernelAction:(santa_action_t)action forVnodeID:(uint64_t)vnodeid {
   if (action == ACTION_RESPOND_CHECKBW_ALLOW) {
     IOConnectCallScalarMethod(self.connection, kSantaUserClientAllowBinary, &vnodeid, 1, 0, 0);
@@ -188,17 +194,24 @@
   }
   TPASS();
 
-  // Fetch the SHA-256 of /bin/ps, as we'll be using that for the cache invalidation test.
-  NSString *psSHA = [self sha256ForPath:@"/bin/ps"];
+  // Fetch the SHA-256 of /bin/ed, as we'll be using that for the cache invalidation test.
+  NSString *edSHA = [self sha256ForPath:@"/bin/ed"];
+
+  // Create the RE used for matching testexe's
+  NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+  NSString *pattern = [cwd stringByAppendingPathComponent:@"testexe\\.(\\d+)"];
+  NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:pattern
+                                                                      options:0
+                                                                        error:NULL];
 
   /// Begin listening for events
   queueMemory = (IODataQueueMemory *)address;
-  while (IODataQueueWaitForAvailableData(queueMemory, receivePort) == kIOReturnSuccess) {
+  do {
     while (IODataQueueDataAvailable(queueMemory)) {
       dataSize = sizeof(vdata);
       kr = IODataQueueDequeue(queueMemory, &vdata, &dataSize);
       if (kr == kIOReturnSuccess) {
-        if ([[self sha256ForPath:@(vdata.path)] isEqual:psSHA]) {
+        if ([[self sha256ForPath:@(vdata.path)] isEqual:edSHA]) {
           [self postToKernelAction:ACTION_RESPOND_CHECKBW_DENY forVnodeID:vdata.vnode_id];
         } else if (strncmp("/bin/mv", vdata.path, strlen("/bin/mv")) == 0) {
           [self postToKernelAction:ACTION_RESPOND_CHECKBW_DENY forVnodeID:vdata.vnode_id];
@@ -220,6 +233,26 @@
           }
           TPASSINFO("Received pid, ppid: %d, %d", vdata.pid, vdata.ppid);
         } else {
+          NSString *path = @(vdata.path);
+
+          // If current executable is one of our test exe's from handlesLotsOfBinaries,
+          // check that the number has increased.
+          NSArray *matches = [re matchesInString:path
+                                         options:0
+                                           range:NSMakeRange(0, path.length)];
+          if (matches.count == 1 && [matches[0] numberOfRanges] == 2) {
+            NSUInteger count = [[path substringWithRange:[matches[0] rangeAtIndex:1]] intValue];
+            if (count <= self.testExeIteration && count > 0) {
+              self.timesSeenTestExeIteration++;
+              if (self.timesSeenTestExeIteration > 2) {
+                TFAILINFO("Saw same binary several times");
+              }
+            } else {
+              self.timesSeenTestExeIteration = 0;
+              self.testExeIteration = (int)count;
+            }
+          }
+
           // Allow everything not related to our testing.
           [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
         }
@@ -227,7 +260,7 @@
         TFAILINFO("Error receiving data: %d", kr);
       }
     }
-  }
+  }  while (IODataQueueWaitForAvailableData(queueMemory, receivePort) == kIOReturnSuccess);
 
   IOConnectUnmapMemory(self.connection, kIODefaultMemoryType, mach_task_self(), address);
   mach_port_destroy(mach_task_self(), receivePort);
@@ -239,11 +272,11 @@
 - (void)receiveAndBlockTests {
   TSTART("Blocks denied binaries");
 
-  NSTask *ps = [self taskWithPath:@"/bin/ps"];
+  NSTask *ed = [self taskWithPath:@"/bin/ed"];
 
   @try {
-    [ps launch];
-    [ps waitUntilExit];
+    [ed launch];
+    [ed waitUntilExit];
     TFAIL();
   }
   @catch (NSException *exception) {
@@ -282,12 +315,12 @@
 
   // Copy the ls binary to a new file
   NSFileManager *fm = [NSFileManager defaultManager];
-  if (![fm copyItemAtPath:@"/bin/pwd" toPath:@"santakerneltests_tmp" error:nil]) {
+  if (![fm copyItemAtPath:@"/bin/pwd" toPath:@"invalidacachetest_tmp" error:nil]) {
     TFAILINFO("Failed to create temp file");
   }
 
   // Launch the new file to put it in the cache
-  NSTask *pwd = [self taskWithPath:@"santakerneltests_tmp"];
+  NSTask *pwd = [self taskWithPath:@"invalidacachetest_tmp"];
   [pwd launch];
   [pwd waitUntilExit];
 
@@ -296,28 +329,42 @@
     TFAILINFO("First launch of test binary failed");
   }
 
-  // Now replace the contents of the test file (which is cached) with the contents of /bin/ps,
+  // Now replace the contents of the test file (which is cached) with the contents of /bin/ed,
   // which is 'blacklisted' by SHA-256 during the tests.
-  FILE *infile = fopen("/bin/ps", "r");
-  FILE *outfile = fopen("santakerneltests_tmp", "w");
+  FILE *infile = fopen("/bin/ed", "r");
+  FILE *outfile = fopen("invalidacachetest_tmp", "w");
   int ch;
   while ((ch = fgetc(infile)) != EOF) {
     fputc(ch, outfile);
   }
   fclose(infile);
-  fclose(outfile);
 
   // Now try running the temp file again. If it succeeds, the test failed.
-  NSTask *ps = [self taskWithPath:@"santakerneltests_tmp"];
+  NSTask *ed = [self taskWithPath:@"invalidacachetest_tmp"];
 
   @try {
-    [ps launch];
-    [ps waitUntilExit];
-    TFAIL();
+    [ed launch];
+    [ed waitUntilExit];
+    TFAILINFO("Launched after write while file open");
+    [fm removeItemAtPath:@"invalidacachetest_tmp" error:nil];
+  } @catch (NSException *exception) {
+    // This is a pass, but we have more to do.
+  }
+
+  // Close the file to flush the write.
+  fclose(outfile);
+
+  // And try running the temp file again. If it succeeds, the test failed.
+  ed = [self taskWithPath:@"invalidacachetest_tmp"];
+
+  @try {
+    [ed launch];
+    [ed waitUntilExit];
+    TFAILINFO("Launched after file closed");
   } @catch (NSException *exception) {
     TPASS();
   } @finally {
-    [fm removeItemAtPath:@"santakerneltests_tmp" error:nil];
+    [fm removeItemAtPath:@"invalidacachetest_tmp" error:nil];
   }
 }
 
@@ -358,12 +405,12 @@
   } else if (pid > 0) {
     int status;
     waitpid(pid, &status, 0);
-    if (WIFEXITED(status) && WEXITSTATUS(status) == EACCES) {
+    if (WIFEXITED(status) && WEXITSTATUS(status) == EPERM) {
       TPASS();
     } else if (WIFSTOPPED(status)) {
       TFAILINFO("Process was executed and is waiting for debugger");
     } else {
-      TFAILINFO("Process did not exit with EACCESS as expected");
+      TFAILINFO("Process did not exit with EPERM as expected");
     }
   } else if (pid == 0) {
     fclose(stdout);
@@ -372,6 +419,36 @@
     execl("/bin/mv", "mv", NULL);
     _exit(errno);
   }
+}
+
+/// Tests that the kernel can handle _lots_ of executions.
+- (void)handlesLotsOfBinaries {
+  TSTART("Handles lots of binaries");
+
+  const int LIMIT = 12000;
+
+  for (int i = 0; i < LIMIT; i++) {
+    printf("\033[s");  // save cursor position
+
+    printf("%d/%i", i+1, LIMIT);
+
+    NSString *fname = [@"testexe" stringByAppendingFormat:@".%i", i];
+    [[NSFileManager defaultManager] copyItemAtPath:@"/bin/hostname" toPath:fname error:NULL];
+
+    @try {
+      NSTask *testexec = [self taskWithPath:fname];
+      [testexec launch];
+      [testexec waitUntilExit];
+    } @catch (NSException *e) {
+      TFAILINFO("Failed to launch");
+    }
+
+    unlink([fname UTF8String]);
+    printf("\033[u");  // restore cursor position
+  }
+  printf("\033[K\033[u");  // clear line, restore cursor position
+
+  TPASS();
 }
 
 #pragma mark - Main
@@ -388,7 +465,7 @@
   [self performSelectorInBackground:@selector(beginListening) withObject:nil];
 
   // Wait for driver to finish getting ready
-  sleep(1.0);
+  sleep(1);
   printf("\n-> Functional tests:\033[m\n");
 
   [self receiveAndBlockTests];
@@ -396,6 +473,7 @@
   [self invalidatesCacheTests];
   [self clearCacheTests];
   [self blocksDeniedTracedBinaries];
+  [self handlesLotsOfBinaries];
 
   printf("\nAll tests passed.\n\n");
 }

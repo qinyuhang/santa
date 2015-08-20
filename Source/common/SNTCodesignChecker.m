@@ -18,7 +18,6 @@
 
 #import "SNTCertificate.h"
 
-
 /**
  *  kStaticSigningFlags are the flags used when validating signatures on disk.
  *
@@ -38,15 +37,14 @@
  *       kSecCSDoNotValidateResources:                         0.032s
  *       kSecCSDoNotValidateResources | kSecCSCheckNestedCode: 0.033s
  */
-const SecCSFlags kStaticSigningFlags = kSecCSDoNotValidateResources | kSecCSCheckNestedCode;
+static const SecCSFlags kStaticSigningFlags = kSecCSDoNotValidateResources | kSecCSCheckNestedCode;
 
 /**
  *  kSigningFlags are the flags used when validating signatures for running binaries.
  *
  *  No special flags needed currently.
  */
-const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
-
+static const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
 
 @interface SNTCodesignChecker ()
 /// Array of @c SNTCertificate's representing the chain of certs this executable was signed with.
@@ -87,7 +85,7 @@ const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
 
     // Wrap SecCertificateRef objects in SNTCertificate and put in a new NSArray
     NSMutableArray *mutableCerts = [[NSMutableArray alloc] initWithCapacity:certs.count];
-    for (int i = 0; i < certs.count; ++i) {
+    for (NSUInteger i = 0; i < certs.count; ++i) {
       SecCertificateRef certRef = (__bridge SecCertificateRef)certs[i];
       SNTCertificate *newCert = [[SNTCertificate alloc] initWithSecCertificateRef:certRef];
       [mutableCerts addObject:newCert];
@@ -105,10 +103,10 @@ const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
   SecStaticCodeRef codeRef = NULL;
 
   // Get SecStaticCodeRef for binary
-  if (SecStaticCodeCreateWithPath((__bridge CFURLRef)[NSURL fileURLWithPath:binaryPath
-                                                                isDirectory:NO],
-                                  kSecCSDefaultFlags,
-                                  &codeRef) == errSecSuccess) {
+  if (SecStaticCodeCreateWithPath(
+          (__bridge CFURLRef)[NSURL fileURLWithPath:binaryPath isDirectory:NO],
+          kSecCSDefaultFlags,
+          &codeRef) == errSecSuccess) {
     self = [self initWithSecStaticCodeRef:codeRef];
   } else {
     self = nil;
@@ -120,12 +118,13 @@ const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
 
 - (instancetype)initWithPID:(pid_t)PID {
   SecCodeRef codeRef = NULL;
-  NSDictionary *attributes = @{(__bridge NSString *)kSecGuestAttributePid: @(PID)};
+  NSDictionary *attributes = @{ (__bridge NSString *)kSecGuestAttributePid : @(PID) };
 
-  if (SecCodeCopyGuestWithAttributes(NULL,
-                                     (__bridge CFDictionaryRef)attributes,
-                                     kSecCSDefaultFlags,
-                                     &codeRef) == errSecSuccess) {
+  if (SecCodeCopyGuestWithAttributes(
+          NULL,
+          (__bridge CFDictionaryRef)attributes,
+          kSecCSDefaultFlags,
+          &codeRef) == errSecSuccess) {
     self = [self initWithSecStaticCodeRef:codeRef];
   } else {
     self = nil;
@@ -170,9 +169,7 @@ const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
   }
 
   return [NSString stringWithFormat:@"%@ binary, signed by %@, located at: %@",
-             binarySource,
-             self.leafCertificate.orgName,
-             self.binaryPath];
+              binarySource, self.leafCertificate.orgName, self.binaryPath];
 }
 
 #pragma mark Public accessors
@@ -183,7 +180,7 @@ const SecCSFlags kSigningFlags = kSecCSDefaultFlags;
 
 - (NSString *)binaryPath {
   CFURLRef path;
-  OSStatus status = SecCodeCopyPath(_codeRef, kSecCSDefaultFlags, &path);
+  OSStatus status = SecCodeCopyPath(self.codeRef, kSecCSDefaultFlags, &path);
   NSURL *pathURL = CFBridgingRelease(path);
   if (status != errSecSuccess) return nil;
   return [pathURL path];

@@ -16,12 +16,13 @@
 
 #import "SNTCertificate.h"
 #import "SNTCodesignChecker.h"
+#import "SNTLogging.h"
 #import "SNTRule.h"
 
 @implementation SNTRuleTable
 
-- (int)initializeDatabase:(FMDatabase *)db fromVersion:(int)version {
-  int newVersion = 0;
+- (uint32_t)initializeDatabase:(FMDatabase *)db fromVersion:(uint32_t)version {
+  uint32_t newVersion = 0;
 
   if (version < 1) {
     [db executeUpdate:@"CREATE TABLE 'rules' ("
@@ -54,24 +55,24 @@
 
 #pragma mark Entry Counts
 
-- (long)ruleCount {
-  __block long count = 0;
+- (NSUInteger)ruleCount {
+  __block NSUInteger count = 0;
   [self inDatabase:^(FMDatabase *db) {
-      count = [db longForQuery:@"SELECT COUNT(*) FROM rules"];
+    count = [db longForQuery:@"SELECT COUNT(*) FROM rules"];
   }];
   return count;
 }
 
-- (long)binaryRuleCount {
-  __block long count = 0;
+- (NSUInteger)binaryRuleCount {
+  __block NSUInteger count = 0;
   [self inDatabase:^(FMDatabase *db) {
       count = [db longForQuery:@"SELECT COUNT(*) FROM binrules"];
   }];
   return count;
 }
 
-- (long)certificateRuleCount {
-  __block long count = 0;
+- (NSUInteger)certificateRuleCount {
+  __block NSUInteger count = 0;
   [self inDatabase:^(FMDatabase *db) {
       count = [db longForQuery:@"SELECT COUNT(*) FROM certrules"];
   }];
@@ -95,7 +96,7 @@
   [self inDatabase:^(FMDatabase *db) {
       FMResultSet *rs = [db executeQuery:@"SELECT * FROM certrules WHERE shasum=? LIMIT 1", SHA256];
       if ([rs next]) {
-          rule = [self ruleFromResultSet:rs];
+        rule = [self ruleFromResultSet:rs];
       }
       [rs close];
   }];
@@ -119,13 +120,21 @@
 
 #pragma mark Adding
 
-- (BOOL)addRules:(NSArray *)rules {
+- (BOOL)addRules:(NSArray *)rules cleanSlate:(BOOL)cleanSlate {
   __block BOOL failed = NO;
 
+  if (!rules || rules.count < 1) {
+    LOGE(@"Received request to add rules with nil/empty array.");
+    return NO;
+  }
+
   [self inTransaction:^(FMDatabase *db, BOOL *rollback) {
+      if (cleanSlate) {
+        [db executeUpdate:@"DELETE FROM rules"];
+      }
+
       for (SNTRule *rule in rules) {
-        if (![rule isKindOfClass:[SNTRule class]] ||
-            !rule.shasum || rule.shasum.length == 0 ||
+        if (![rule isKindOfClass:[SNTRule class]] || rule.shasum.length == 0 ||
             rule.state == RULESTATE_UNKNOWN || rule.type == RULETYPE_UNKNOWN) {
           *rollback = failed = YES;
           return;
@@ -139,8 +148,8 @@
           }
         } else {
           if (![db executeUpdate:@"INSERT OR REPLACE INTO rules "
-                                @"(shasum, state, type, custommsg) "
-                                @"VALUES (?, ?, ?, ?);",
+                                 @"(shasum, state, type, custommsg) "
+                                 @"VALUES (?, ?, ?, ?);",
                   rule.shasum, @(rule.state), @(rule.type), rule.customMsg]) {
             *rollback = failed = YES;
             return;

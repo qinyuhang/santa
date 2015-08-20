@@ -36,7 +36,7 @@ static NSMutableDictionary *registeredCommands;
 
   int longestCommandName = 0;
   for (NSString *cmdName in registeredCommands) {
-    if ([cmdName length] > longestCommandName) {
+    if ((int)[cmdName length] > longestCommandName) {
       longestCommandName = (int)[cmdName length];
     }
   }
@@ -55,18 +55,17 @@ static NSMutableDictionary *registeredCommands;
 + (NSString *)helpForCommandWithName:(NSString *)commandName {
   Class<SNTCommand> command = registeredCommands[commandName];
   if (command) {
-    NSMutableString *helpText = [[NSMutableString alloc] init];
-    [helpText appendFormat:@"Help for '%@':\n", commandName];
-    [helpText appendString:[command longHelpText]];
-    return helpText;
+    NSString *longHelp = [command longHelpText];
+    if (longHelp) {
+      return [NSString stringWithFormat:@"Help for '%@':\n%@", commandName, longHelp];
+    } else {
+      return @"This command does not have any help information.";
+    }
   }
   return nil;
 }
 
 + (SNTXPCConnection *)connectToDaemon {
-  // TODO(rah): Re-factor this so that successfully establishing the connection runs the command,
-  // instead of having to sleep until the connection is made.
-
   SNTXPCConnection *daemonConn =
       [[SNTXPCConnection alloc] initClientWithName:[SNTXPCControlInterface serviceId]
                                            options:NSXPCConnectionPrivileged];
@@ -78,7 +77,7 @@ static NSMutableDictionary *registeredCommands;
   };
 
   daemonConn.invalidationHandler = ^{
-      printf("An error occurred communicating with the daemon\n");
+      printf("An error occurred communicating with the daemon, is it running?\n");
       exit(1);
   };
 

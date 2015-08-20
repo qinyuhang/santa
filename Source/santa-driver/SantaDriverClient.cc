@@ -36,68 +36,58 @@ bool SantaDriverClient::initWithTask(
 }
 
 bool SantaDriverClient::start(IOService *provider) {
-  fProvider = OSDynamicCast(com_google_SantaDriver, provider);
+  myProvider = OSDynamicCast(com_google_SantaDriver, provider);
 
-  if (!fProvider) return false;
+  if (!myProvider) return false;
   if (!super::start(provider)) return false;
 
-  fSDM = fProvider->GetDecisionManager();
+  decisionManager = myProvider->GetDecisionManager();
+  if (!decisionManager) return false;
 
   return true;
 }
 
 void SantaDriverClient::stop(IOService *provider) {
   super::stop(provider);
-  fProvider = NULL;
+  myProvider = NULL;
+  decisionManager = NULL;
 }
 
 IOReturn SantaDriverClient::clientClose() {
-  terminate(kIOServiceSynchronous);
-  return kIOReturnSuccess;
+  decisionManager->DisconnectClient(true);
+  return terminate(kIOServiceSynchronous) ? kIOReturnSuccess : kIOReturnError;
 }
 
 bool SantaDriverClient::terminate(IOOptionBits options) {
-  fSDM->DisconnectClient();
+  decisionManager->DisconnectClient();
   LOGI("Client disconnected.");
 
-  fSharedMemory->release();
-  fDataQueue->release();
-
-  fSharedMemory = NULL;
-  fDataQueue = NULL;
-
-  if (fProvider && fProvider->isOpen(this)) fProvider->close(this);
+  if (myProvider && myProvider->isOpen(this)) myProvider->close(this);
 
   return super::terminate(options);
 }
 
 #pragma mark Fetching memory and data queue notifications
 
-IOReturn SantaDriverClient::registerNotificationPort(mach_port_t port,
-                                                     UInt32 type,
-                                                     UInt32 ref) {
-  if ((!fDataQueue) || (port == MACH_PORT_NULL)) return kIOReturnError;
+IOReturn SantaDriverClient::registerNotificationPort(
+    mach_port_t port, UInt32 type, UInt32 ref) {
+  if (port == MACH_PORT_NULL) return kIOReturnError;
 
-  fDataQueue->setNotificationPort(port);
+  decisionManager->ConnectClient(port, proc_selfpid());
+  LOGI("Client connected, PID: %d.", proc_selfpid());
 
   return kIOReturnSuccess;
 }
 
-IOReturn SantaDriverClient::clientMemoryForType(UInt32 type,
-                                                IOOptionBits *options,
-                                                IOMemoryDescriptor **memory) {
-  *memory = NULL;
+IOReturn SantaDriverClient::clientMemoryForType(
+    UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) {
+  if (type != kIODefaultMemoryType) return kIOReturnNoMemory;
+
   *options = 0;
+  *memory = decisionManager->GetMemoryDescriptor();
+  (*memory)->retain();
 
-  if (type == kIODefaultMemoryType) {
-    if (!fSharedMemory) return kIOReturnNoMemory;
-    fSharedMemory->retain();  // client will decrement this ref
-    *memory = fSharedMemory;
-
-    return kIOReturnSuccess;
-  }
-
-  return kIOReturnNoMemory;
+  return kIOReturnSuccess;
 }
 
 #pragma mark Callable Methods
@@ -105,26 +95,10 @@ IOReturn SantaDriverClient::clientMemoryForType(UInt32 type,
 IOReturn SantaDriverClient::open() {
   if (isInactive()) return kIOReturnNotAttached;
 
-  if (!fProvider->open(this)) {
+  if (!myProvider->open(this)) {
     LOGW("A second client tried to connect.");
     return kIOReturnExclusiveAccess;
   }
-
-  fDataQueue = IOSharedDataQueue::withCapacity((sizeof(santa_message_t) +
-                                                DATA_QUEUE_ENTRY_HEADER_SIZE)
-                                                * kMaxQueueEvents);
-  if (!fDataQueue) return kIOReturnNoMemory;
-
-  fSharedMemory = fDataQueue->getMemoryDescriptor();
-  if (!fSharedMemory) {
-    fDataQueue->release();
-    fDataQueue = NULL;
-    return kIOReturnVMError;
-  }
-
-  fSDM->ConnectClient(fDataQueue, proc_selfpid());
-
-  LOGI("Client connected, PID: %d.", proc_selfpid());
 
   return kIOReturnSuccess;
 }
@@ -140,9 +114,7 @@ IOReturn SantaDriverClient::static_open(
 IOReturn SantaDriverClient::allow_binary(const uint64_t vnode_id) {
   char vnode_id_str[21];
   snprintf(vnode_id_str, sizeof(vnode_id_str), "%llu", vnode_id);
-  fSDM->AddToCache(vnode_id_str,
-                   ACTION_RESPOND_CHECKBW_ALLOW,
-                   fSDM->GetCurrentUptime());
+  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_CHECKBW_ALLOW);
 
   return kIOReturnSuccess;
 }
@@ -159,9 +131,7 @@ IOReturn SantaDriverClient::static_allow_binary(
 IOReturn SantaDriverClient::deny_binary(const uint64_t vnode_id) {
   char vnode_id_str[21];
   snprintf(vnode_id_str, sizeof(vnode_id_str), "%llu", vnode_id);
-  fSDM->AddToCache(vnode_id_str,
-                   ACTION_RESPOND_CHECKBW_DENY,
-                   fSDM->GetCurrentUptime());
+  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_CHECKBW_DENY);
 
   return kIOReturnSuccess;
 }
@@ -176,7 +146,7 @@ IOReturn SantaDriverClient::static_deny_binary(
 }
 
 IOReturn SantaDriverClient::clear_cache() {
-  fSDM->ClearCache();
+  decisionManager->ClearCache();
   return kIOReturnSuccess;
 }
 
@@ -189,7 +159,7 @@ IOReturn SantaDriverClient::static_clear_cache(
 }
 
 IOReturn SantaDriverClient::cache_count(uint64_t *output) {
-  *output = fSDM->CacheCount();
+  *output = decisionManager->CacheCount();
   return kIOReturnSuccess;
 }
 

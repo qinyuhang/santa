@@ -18,9 +18,7 @@
 #import <Security/Security.h>
 
 @interface SNTCertificate ()
-///
 ///  A container for cached property values
-///
 @property NSMutableDictionary *memoizedData;
 @end
 
@@ -46,7 +44,8 @@ static NSString *const kCertDataKey = @"certData";
     // Despite the header file claiming that SecCertificateCreateWithData will return NULL if
     // @c certData doesn't contain a valid DER-encoded X509 cert, this isn't always true.
     // radar://problem/16124651
-    // To workaround, check that the certificate serial number can be retrieved.
+    // To workaround, check that the certificate serial number can be retrieved. According to
+    // RFC5280, the serial number field is required.
     NSData *ser = CFBridgingRelease(SecCertificateCopySerialNumber(cert, NULL));
     if (ser) {
       self = [self initWithSecCertificateRef:cert];
@@ -81,9 +80,9 @@ static NSString *const kCertDataKey = @"certData";
   NSData *output = nil;
 
   if (SecTransformSetAttribute(transform,
-                             kSecTransformInputAttributeName,
-                             (__bridge CFDataRef)input,
-                             NULL)) {
+                               kSecTransformInputAttributeName,
+                               (__bridge CFDataRef)input,
+                               NULL)) {
     output = CFBridgingRelease(SecTransformExecute(transform, NULL));
   }
   if (transform) CFRelease(transform);
@@ -127,11 +126,12 @@ static NSString *const kCertDataKey = @"certData";
 
 #pragma mark Equality & description
 
-- (BOOL)isEqual:(SNTCertificate *)other {
+- (BOOL)isEqual:(id)other {
   if (self == other) return YES;
   if (![other isKindOfClass:[SNTCertificate class]]) return NO;
 
-  return [self.certData isEqual:other.certData];
+  SNTCertificate *o = other;
+  return [self.certData isEqual:o.certData];
 }
 
 - (NSUInteger)hash {
@@ -139,10 +139,8 @@ static NSString *const kCertDataKey = @"certData";
 }
 
 - (NSString *)description {
-  return [NSString stringWithFormat:@"/O=%@/OU=%@/CN=%@",
-          self.orgName,
-          self.orgUnit,
-          self.commonName];
+  return
+      [NSString stringWithFormat:@"/O=%@/OU=%@/CN=%@", self.orgName, self.orgUnit, self.commonName];
 }
 
 #pragma mark NSSecureCoding
@@ -228,7 +226,7 @@ static NSString *const kCertDataKey = @"certData";
     }
     return nil;
   }
-  @catch (NSException *exception) {
+  @catch (NSException *e) {
     return nil;
   }
 }

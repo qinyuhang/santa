@@ -90,4 +90,14 @@
 ///
 @property NSNumber *pid;
 
+///
+///  The parent process ID of the binary being executed.
+///
+@property NSNumber *ppid;
+
+///
+///  The name of the parent process.
+///
+@property NSString *parentName;
+
 @end

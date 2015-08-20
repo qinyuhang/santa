@@ -23,52 +23,47 @@
 @interface SNTFileInfo ()
 @property NSString *path;
 @property NSData *fileData;
+
+// Cached properties
+@property NSData *firstMachHeaderData;
 @property NSBundle *bundleRef;
 @property NSDictionary *infoDict;
+@property NSArray *architecturesArray;
 @end
 
 @implementation SNTFileInfo
 
-- (instancetype)initWithPath:(NSString *)path {
+- (instancetype)initWithPath:(NSString *)path error:(NSError **)error {
   self = [super init];
-
   if (self) {
-    // Convert to absolute, standardized path
-    path = [path stringByResolvingSymlinksInPath];
-    if (![path isAbsolutePath]) {
-      NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
-      path = [cwd stringByAppendingPathComponent:path];
-    }
-    path = [path stringByStandardizingPath];
-
-    // Determine if file exists.
-    // If path is actually a directory, check to see if it's a bundle and has a CFBundleExecutable.
-    BOOL directory;
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&directory]) {
-      return nil;
-    } else if (directory) {
-      NSString *infoPath = [path stringByAppendingPathComponent:@"Contents/Info.plist"];
-      NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-      if (d && d[@"CFBundleExecutable"]) {
-        path = [path stringByAppendingPathComponent:@"Contents/MacOS"];
-        _path = [path stringByAppendingPathComponent:d[@"CFBundleExecutable"]];
-      } else {
-        return nil;
+    _path = [self resolvePath:path];
+    if (_path.length == 0) {
+      if (error) {
+        NSString *errStr = @"Unable to resolve empty path";
+        if (path) errStr = [@"Unable to resolve path: " stringByAppendingString:path];
+        *error = [NSError errorWithDomain:@"com.google.santa.fileinfo"
+                                     code:260
+                                 userInfo:@{ NSLocalizedDescriptionKey: errStr }];
       }
-    } else {
-      _path = path;
+      return nil;
     }
 
-    _fileData = [NSData dataWithContentsOfFile:_path options:NSDataReadingMappedIfSafe error:nil];
-    if (!_fileData) return nil;
+    _fileData = [NSData dataWithContentsOfFile:_path
+                                       options:NSDataReadingMappedIfSafe
+                                         error:error];
+    if (_fileData.length == 0) return nil;
   }
 
   return self;
 }
 
+- (instancetype)initWithPath:(NSString *)path {
+  return [self initWithPath:path error:NULL];
+}
+
 - (NSString *)SHA1 {
   unsigned char sha1[CC_SHA1_DIGEST_LENGTH];
-  CC_SHA1([self.fileData bytes], (unsigned int)[self.fileData length], sha1);
+  CC_SHA1(self.fileData.bytes, (unsigned int)self.fileData.length, sha1);
 
   // Convert the binary SHA into hex
   NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
@@ -80,63 +75,66 @@
 }
 
 - (NSString *)SHA256 {
-  unsigned char sha2[CC_SHA256_DIGEST_LENGTH];
-  CC_SHA256(self.fileData.bytes, (unsigned int)self.fileData.length, sha2);
+  unsigned char sha256[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256(self.fileData.bytes, (unsigned int)self.fileData.length, sha256);
 
-  NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA256_DIGEST_LENGTH *2];
+  NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
   for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-    [buf appendFormat:@"%02x", (unsigned char)sha2[i]];
+    [buf appendFormat:@"%02x", (unsigned char)sha256[i]];
   }
 
   return buf;
 }
 
 - (NSString *)machoType {
-  if ([self isDylib])   { return @"Dynamic Library"; }
-  if ([self isKext])    { return @"Kernel Extension"; }
-  if ([self isFat])     { return @"Fat Binary"; }
-  if ([self isMachO])   { return @"Thin Binary"; }
-  if ([self isScript])  { return @"Script"; }
+  if ([self isDylib])  return @"Dynamic Library";
+  if ([self isKext])   return @"Kernel Extension";
+  if ([self isFat])    return @"Fat Binary";
+  if ([self isMachO])  return @"Thin Binary";
+  if ([self isScript]) return @"Script";
   return @"Unknown (not executable?)";
 }
 
 - (NSArray *)architectures {
-  if (![self isMachO]) return nil;
+  if (!self.architecturesArray) {
+    self.architecturesArray = (NSArray *)[NSNull null];
 
-  if ([self isFat]) {
-    NSMutableArray *ret = [[NSMutableArray alloc] init];
+    if ([self isFat]) {
+      NSMutableArray *ret = [[NSMutableArray alloc] init];
 
-    // Retrieve just the fat_header, if possible.
-    NSData *head = [self safeSubdataWithRange:NSMakeRange(0, sizeof(struct fat_header))];
-    if (!head) return nil;
-    struct fat_header *fat_header = (struct fat_header *)[head bytes];
+      // Retrieve just the fat_header, if possible.
+      NSData *head = [self safeSubdataWithRange:NSMakeRange(0, sizeof(struct fat_header))];
+      if (!head) return nil;
+      struct fat_header *fat_header = (struct fat_header *)[head bytes];
 
-    // Get number of architectures in the binary
-    uint32_t narch = NSSwapBigIntToHost(fat_header->nfat_arch);
+      // Get number of architectures in the binary
+      uint32_t narch = NSSwapBigIntToHost(fat_header->nfat_arch);
 
-    // Retrieve just the fat_arch's, make a mutable copy and if necessary swap the bytes
-    NSData *archs = [self safeSubdataWithRange:NSMakeRange(sizeof(struct fat_header),
-                                                           sizeof(struct fat_arch) * narch)];
-    if (!archs) return nil;
-    struct fat_arch *fat_archs = (struct fat_arch *)[archs bytes];
+      // Retrieve just the fat_arch's, make a mutable copy and if necessary swap the bytes
+      NSData *archs = [self safeSubdataWithRange:NSMakeRange(sizeof(struct fat_header),
+                                                             sizeof(struct fat_arch) * narch)];
+      if (!archs) return nil;
+      struct fat_arch *fat_archs = (struct fat_arch *)[archs bytes];
 
-    // For each arch, get the name of it's architecture
-    for (int i = 0; i < narch; ++i) {
-      [ret addObject:[self nameForCPUType:NSSwapBigIntToHost(fat_archs[i].cputype)]];
+      // For each arch, get the name of its architecture
+      for (uint32_t i = 0; i < narch; ++i) {
+        cpu_type_t cpu = (cpu_type_t)NSSwapBigIntToHost((unsigned int)fat_archs[i].cputype);
+        [ret addObject:[self nameForCPUType:cpu]];
+      }
+
+      self.architecturesArray = ret;
+    } else if ([self firstMachHeader]) {
+      struct mach_header *hdr = [self firstMachHeader];
+      self.architecturesArray = @[ [self nameForCPUType:hdr->cputype] ];
     }
-    return ret;
-  } else {
-    struct mach_header *hdr = [self firstMachHeader];
-    return @[ [self nameForCPUType:hdr->cputype] ];
   }
-  return nil;
+
+  return self.architecturesArray == (NSArray *)[NSNull null] ? nil : self.architecturesArray;
 }
 
 - (BOOL)isDylib {
   struct mach_header *mach_header = [self firstMachHeader];
-  if (!mach_header) return NO;
-  if (mach_header->filetype == MH_DYLIB ||
-      mach_header->filetype == MH_FVMLIB) {
+  if (mach_header && (mach_header->filetype == MH_DYLIB || mach_header->filetype == MH_FVMLIB)) {
     return YES;
   }
 
@@ -145,8 +143,7 @@
 
 - (BOOL)isKext {
   struct mach_header *mach_header = [self firstMachHeader];
-  if (!mach_header) return NO;
-  if (mach_header->filetype == MH_KEXT_BUNDLE) {
+  if (mach_header && mach_header->filetype == MH_KEXT_BUNDLE) {
     return YES;
   }
 
@@ -154,8 +151,7 @@
 }
 
 - (BOOL)isMachO {
-  return ([self.fileData length] >= 160 &&
-          ([self isMachHeader:(struct mach_header *)[self.fileData bytes]] || [self isFat]));
+  return [self firstMachHeader] != nil;
 }
 
 - (BOOL)isFat {
@@ -163,8 +159,6 @@
 }
 
 - (BOOL)isScript {
-  if ([self.fileData length] < 1) return NO;
-
   char magic[2];
   [self.fileData getBytes:&magic length:2];
 
@@ -183,15 +177,15 @@
   return NO;
 }
 
-# pragma mark Bundle Information
+#pragma mark Bundle Information
 
 ///
 ///  Try and determine the bundle that the represented executable is contained within, if any.
 ///
 ///  Rationale: An NSBundle has a method executablePath for discovering the main binary within a
-///  bundle but provides no way to get an NSBundle object when only the executablePath is known. Also,
-///  a bundle can contain multiple binaries within the MacOS folder and we want any of these to count
-///  as being part of the bundle.
+///  bundle but provides no way to get an NSBundle object when only the executablePath is known.
+///  Also a bundle can contain multiple binaries within the MacOS folder and we want any of these
+///  to count as being part of the bundle.
 ///
 ///  This method relies on executable bundles being laid out as follows:
 ///
@@ -206,21 +200,19 @@
 ///  NSBundle reference for Bundle.app.
 ///
 - (NSBundle *)bundle {
-  if (self.bundleRef) return self.bundleRef;
+  if (!self.bundleRef) {
+    self.bundleRef = (NSBundle *)[NSNull null];
 
-  NSArray *pathComponents = [self.path pathComponents];
+    // Check that the full path is at least 4-levels deep:
+    // e.g: /Calendar.app/Contents/MacOS/Calendar
+    NSArray *pathComponents = [self.path pathComponents];
+    if ([pathComponents count] < 4) return nil;
 
-  // Check that the full path is at least 4-levels deep:
-  // e.g: /Calendar.app/Contents/MacOS/Calendar
-  if ([pathComponents count] < 4) return nil;
-
-  pathComponents = [pathComponents subarrayWithRange:NSMakeRange(0, [pathComponents count] - 3)];
-  self.bundleRef = [NSBundle bundleWithPath:[NSString pathWithComponents:pathComponents]];
-
-  // Clear the bundle if it doesn't have a bundle ID
-  if (![self.bundleRef objectForInfoDictionaryKey:@"CFBundleIdentifier"]) self.bundleRef = nil;
-
-  return self.bundleRef;
+    pathComponents = [pathComponents subarrayWithRange:NSMakeRange(0, [pathComponents count] - 3)];
+    NSBundle *bndl = [NSBundle bundleWithPath:[NSString pathWithComponents:pathComponents]];
+    if (bndl && [bndl objectForInfoDictionaryKey:@"CFBundleIdentifier"]) self.bundleRef = bndl;
+  }
+  return self.bundleRef == (NSBundle *)[NSNull null] ? nil : self.bundleRef;
 }
 
 - (NSString *)bundlePath {
@@ -228,38 +220,42 @@
 }
 
 - (NSDictionary *)infoPlist {
-  if (self.infoDict) return self.infoDict;
+  if (!self.infoDict) {
+    self.infoDict = (NSDictionary *)[NSNull null];
 
-  if ([self bundle]) {
-    self.infoDict = [[self bundle] infoDictionary];
-    return self.infoDict;
+    // Binaries with embedded Info.plist aren't in an NSBundle but
+    // CFBundleCopyInfoDictionaryForURL will return the embedded info dict.
+    NSURL *url = [NSURL fileURLWithPath:self.path isDirectory:NO];
+    NSDictionary *infoDict =
+    (__bridge_transfer NSDictionary *)CFBundleCopyInfoDictionaryForURL((__bridge CFURLRef)url);
+    if (infoDict){
+      self.infoDict = infoDict;
+    } else if ([self bundle] && [self.bundle infoDictionary]) {
+      self.infoDict = [self.bundle infoDictionary];
+    }
   }
-
-  NSURL *url = [NSURL fileURLWithPath:self.path isDirectory:NO];
-  self.infoDict =
-      (__bridge_transfer NSDictionary*)CFBundleCopyInfoDictionaryForURL((__bridge CFURLRef) url);
-  return self.infoDict;
+  return self.infoDict == (NSDictionary *)[NSNull null] ? nil : self.infoDict;
 }
 
 - (NSString *)bundleIdentifier {
-  return [[self infoPlist] objectForKey:@"CFBundleIdentifier"];
+  return [self.infoPlist objectForKey:@"CFBundleIdentifier"];
 }
 
 - (NSString *)bundleName {
-  return [[self infoPlist] objectForKey:@"CFBundleName"];
+  return [self.infoPlist objectForKey:@"CFBundleName"];
 }
 
 - (NSString *)bundleVersion {
-  return [[self infoPlist] objectForKey:@"CFBundleVersion"];
+  return [self.infoPlist objectForKey:@"CFBundleVersion"];
 }
 
 - (NSString *)bundleShortVersionString {
-  return [[self infoPlist] objectForKey:@"CFBundleShortVersionString"];
+  return [self.infoPlist objectForKey:@"CFBundleShortVersionString"];
 }
 
 - (NSArray *)downloadURLs {
   char *path = (char *)[self.path fileSystemRepresentation];
-  size_t size = getxattr(path, "com.apple.metadata:kMDItemWhereFroms", NULL, 0, 0, 0);
+  size_t size = (size_t)getxattr(path, "com.apple.metadata:kMDItemWhereFroms", NULL, 0, 0, 0);
   char *value = malloc(size);
   if (!value) return nil;
 
@@ -282,7 +278,7 @@
   return nil;
 }
 
-# pragma mark Internal Methods
+#pragma mark Internal Methods
 
 ///
 ///  Look through the file for the first mach_header. If the file is thin, this will be the
@@ -290,30 +286,31 @@
 ///  architecture-specific header.
 ///
 - (struct mach_header *)firstMachHeader {
-  if (![self isMachO]) return NULL;
+  if (!self.firstMachHeaderData) {
+    self.firstMachHeaderData = (NSData *)[NSNull null];
 
-  struct mach_header *mach_header = (struct mach_header *)[self.fileData bytes];
-  struct fat_header *fat_header = (struct fat_header *)[self.fileData bytes];
+    if ([self isFatHeader:(struct fat_header *)[self.fileData bytes]]) {
+      // Get the bytes for the fat_arch
+      NSData *archHdr = [self safeSubdataWithRange:NSMakeRange(sizeof(struct fat_header),
+                                                               sizeof(struct fat_arch))];
+      if (!archHdr) return NULL;
+      struct fat_arch *fat_arch = (struct fat_arch *)[archHdr bytes];
 
-  if ([self isFatHeader:fat_header]) {
-    // Get the bytes for the fat_arch
-    NSData *archHdr = [self safeSubdataWithRange:NSMakeRange(sizeof(struct fat_header),
-                                                             sizeof(struct fat_arch))];
-    if (!archHdr) return nil;
-    struct fat_arch *fat_arch = (struct fat_arch *)[archHdr bytes];
+      // Get bytes for first mach_header
+      NSData *machHdr = [self safeSubdataWithRange:NSMakeRange(NSSwapBigIntToHost(fat_arch->offset),
+                                                               sizeof(struct mach_header))];
+      if (!machHdr || ![self isMachHeader:(struct mach_header *)machHdr.bytes]) return NULL;
 
-    // Get bytes for first mach_header
-    NSData *machHdr = [self safeSubdataWithRange:NSMakeRange(NSSwapBigIntToHost(fat_arch->offset),
-                                                             sizeof(struct mach_header))];
-    if (!machHdr) return nil;
-    mach_header = (struct mach_header *)[machHdr bytes];
+      self.firstMachHeaderData = [machHdr copy];
+    } else if ([self isMachHeader:(struct mach_header *)[self.fileData bytes]]) {
+      NSData *machHdr = [self safeSubdataWithRange:NSMakeRange(0, sizeof(struct mach_header))];
+      if (!machHdr) return NULL;
+      self.firstMachHeaderData = [machHdr copy];
+    }
   }
-
-  if ([self isMachHeader:mach_header]) {
-    return mach_header;
-  }
-
-  return NULL;
+  return (self.firstMachHeaderData == (NSData *)[NSNull null] ?
+          NULL :
+          (struct mach_header *)self.firstMachHeaderData.bytes);
 }
 
 - (BOOL)isMachHeader:(struct mach_header *)header {
@@ -333,7 +330,7 @@
   @try {
     return [self.fileData subdataWithRange:range];
   }
-  @catch (NSException *exception) {
+  @catch (NSException *e) {
     return nil;
   }
 }
@@ -352,6 +349,34 @@
       return @"unknown";
   }
   return nil;
+}
+
+- (NSString *)resolvePath:(NSString *)path {
+  // Convert to absolute, standardized path
+  path = [path stringByResolvingSymlinksInPath];
+  if (![path isAbsolutePath]) {
+    NSString *cwd = [[NSFileManager defaultManager] currentDirectoryPath];
+    path = [cwd stringByAppendingPathComponent:path];
+  }
+  path = [path stringByStandardizingPath];
+
+  // Determine if file exists.
+  // If path is actually a directory, check to see if it's a bundle and has a CFBundleExecutable.
+  BOOL directory;
+  if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&directory]) {
+    return nil;
+  } else if (directory) {
+    NSString *infoPath = [path stringByAppendingPathComponent:@"Contents/Info.plist"];
+    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+    if (d && d[@"CFBundleExecutable"]) {
+      path = [path stringByAppendingPathComponent:@"Contents/MacOS"];
+      return [path stringByAppendingPathComponent:d[@"CFBundleExecutable"]];
+    } else {
+      return nil;
+    }
+  } else {
+    return path;
+  }
 }
 
 @end

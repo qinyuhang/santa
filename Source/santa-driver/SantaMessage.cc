@@ -24,8 +24,8 @@ santa_action_t SantaMessage::getAction() const {
   return action_;
 }
 
-void SantaMessage::setAction(const santa_action_t action,
-                             const uint64_t microsecs) {
+void SantaMessage::setAction(
+    const santa_action_t action, const uint64_t microsecs) {
   action_ = action;
   microsecs_ = microsecs;
 }

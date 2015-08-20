@@ -28,14 +28,12 @@ static NSString * const kEventsDatabaseName = @"events.db";
   static FMDatabaseQueue *eventDatabaseQueue = nil;
   static dispatch_once_t eventDatabaseToken;
   dispatch_once(&eventDatabaseToken, ^{
-    [self createDatabasePath];
-    NSString *fullPath = [kDatabasePath stringByAppendingPathComponent:kEventsDatabaseName];
-    eventDatabaseQueue = [[FMDatabaseQueue alloc] initWithPath:fullPath];
+      [self createDatabasePath];
+      NSString *fullPath = [kDatabasePath stringByAppendingPathComponent:kEventsDatabaseName];
+      eventDatabaseQueue = [[FMDatabaseQueue alloc] initWithPath:fullPath];
 
-#ifndef DEBUG
-    [eventDatabaseQueue inDatabase:^(FMDatabase *db) {
-      db.logsErrors = NO;
-    }];
+  #ifndef DEBUG
+      [eventDatabaseQueue inDatabase:^(FMDatabase *db) { db.logsErrors = NO; }];
 #endif
   });
 
@@ -46,14 +44,12 @@ static NSString * const kEventsDatabaseName = @"events.db";
   static FMDatabaseQueue *ruleDatabaseQueue = nil;
   static dispatch_once_t ruleDatabaseToken;
   dispatch_once(&ruleDatabaseToken, ^{
-    [self createDatabasePath];
-    NSString *fullPath = [kDatabasePath stringByAppendingPathComponent:kRulesDatabaseName];
-    ruleDatabaseQueue = [[FMDatabaseQueue alloc] initWithPath:fullPath];
+      [self createDatabasePath];
+      NSString *fullPath = [kDatabasePath stringByAppendingPathComponent:kRulesDatabaseName];
+      ruleDatabaseQueue = [[FMDatabaseQueue alloc] initWithPath:fullPath];
 
-#ifndef DEBUG
-    [ruleDatabaseQueue inDatabase:^(FMDatabase *db) {
-      db.logsErrors = NO;
-    }];
+  #ifndef DEBUG
+      [ruleDatabaseQueue inDatabase:^(FMDatabase *db) { db.logsErrors = NO; }];
 #endif
   });
   return [[SNTRuleTable alloc] initWithDatabaseQueue:ruleDatabaseQueue];
@@ -65,9 +61,11 @@ static NSString * const kEventsDatabaseName = @"events.db";
 + (void)createDatabasePath {
   NSFileManager *fm = [NSFileManager defaultManager];
 
-  NSDictionary *attrs = @{ NSFileOwnerAccountName: @"root",
-                           NSFileGroupOwnerAccountName: @"wheel",
-                           NSFilePosixPermissions: @0755 };
+  NSDictionary *attrs = @{
+    NSFileOwnerAccountName : @"root",
+    NSFileGroupOwnerAccountName : @"wheel",
+    NSFilePosixPermissions : @0755
+  };
 
   if (![fm fileExistsAtPath:kDatabasePath]) {
     [fm createDirectoryAtPath:kDatabasePath

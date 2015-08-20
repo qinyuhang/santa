@@ -37,7 +37,7 @@
 ///
 ///  The custom message to display for this event
 ///
-@property NSString *customMessage;
+@property(copy) NSString *customMessage;
 
 ///
 ///  The delegate to inform when the notification is dismissed
@@ -47,11 +47,17 @@
 ///
 ///  A 'friendly' string representing the certificate information
 ///
-@property(readonly) IBOutlet NSString *publisherInfo;
+@property(readonly, nonatomic) NSString *publisherInfo;
 
 ///
 ///  An optional message to display with this block.
 ///
-@property(readonly) IBOutlet NSAttributedString *attributedCustomMessage;
+@property(readonly, nonatomic) NSAttributedString *attributedCustomMessage;
+
+///
+///  Reference to the "Open Event" button in the XIB. Used to either remove the button
+///  if it isn't needed or set its title if it is.
+///
+@property IBOutlet NSButton *openEventButton;
 
 @end

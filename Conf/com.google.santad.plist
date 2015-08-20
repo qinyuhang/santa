@@ -6,19 +6,15 @@
 				<string>com.google.santad</string>
 				<key>ProgramArguments</key>
 				<array>
-								<string>/usr/libexec/santad</string>
+					<string>/Library/Extensions/santa-driver.kext/Contents/MacOS/santad</string>
 				</array>
 				<key>MachServices</key>
 				<dict>
-								<key>SantaXPCNotifications</key>
-								<true/>
-								<key>SantaXPCControl</key>
-								<true/>
+					<key>SantaXPCNotifications</key>
+					<true/>
+					<key>SantaXPCControl</key>
+					<true/>
 				</dict>
-				<key>StandardOutPath</key>
-				<string>/var/log/santa.log</string>
-				<key>StandardErrorPath</key>
-				<string>/var/log/santa.log</string>
 				<key>RunAtLoad</key>
 				<true/>
 				<key>KeepAlive</key>

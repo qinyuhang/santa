@@ -16,11 +16,12 @@
 /// Common defines between kernel <-> userspace
 ///
 
+#include <sys/param.h>
+
 #ifndef SANTA__COMMON__KERNELCOMMON_H
 #define SANTA__COMMON__KERNELCOMMON_H
 
 // Defines the lengths of paths and Vnode IDs passed around.
-#define MAX_PATH_LEN 1024    // ==PATH_LEN from syslimits.h
 #define MAX_VNODE_ID_STR 21  // digits in UINT64_MAX + 1 for NULL-terminator
 
 // Defines the name of the userclient class and the driver bundle ID.
@@ -50,15 +51,20 @@ typedef enum {
   ACTION_RESPOND_CHECKBW_ALLOW = 11,
   ACTION_RESPOND_CHECKBW_DENY = 12,
 
+  // NOTIFY
+  ACTION_NOTIFY_EXEC_ALLOW_NODAEMON = 30,
+  ACTION_NOTIFY_EXEC_ALLOW_CACHED = 31,
+  ACTION_NOTIFY_EXEC_DENY_CACHED = 32,
+
   // SHUTDOWN
-  ACTION_REQUEST_SHUTDOWN = 60,
+  ACTION_REQUEST_SHUTDOWN = 90,
 
   // ERROR
   ACTION_ERROR = 99,
 } santa_action_t;
 
-#define CHECKBW_RESPONSE_VALID(x) (x == ACTION_RESPOND_CHECKBW_ALLOW || \
-  x == ACTION_RESPOND_CHECKBW_DENY)
+#define CHECKBW_RESPONSE_VALID(x) \
+  (x == ACTION_RESPOND_CHECKBW_ALLOW || x == ACTION_RESPOND_CHECKBW_DENY)
 
 // Message struct that is sent down the IODataQueue.
 typedef struct {
@@ -67,7 +73,7 @@ typedef struct {
   uid_t userId;
   pid_t pid;
   pid_t ppid;
-  char path[MAX_PATH_LEN];
+  char path[MAXPATHLEN];
 } santa_message_t;
 
 #endif  // SANTA__COMMON__KERNELCOMMON_H

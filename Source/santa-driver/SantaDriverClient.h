@@ -16,9 +16,6 @@
 #define SANTA__SANTA_DRIVER__SANTADRIVERUSERCLIENT_H
 
 #include <IOKit/IOUserClient.h>
-#include <IOKit/IOSharedDataQueue.h>
-#include <IOKit/IOLib.h>
-#include <IOKit/IODataQueueShared.h>
 #include <sys/kauth.h>
 #include <sys/vnode.h>
 #include <sys/proc.h>
@@ -28,9 +25,6 @@
 #include "SantaMessage.h"
 #include "SNTKernelCommon.h"
 
-// The maximum number of messages can be kept in the IODataQueue at any time.
-const int kMaxQueueEvents = 64;
-
 ///
 ///  This class is instantiated by IOKit when a new client process attempts to
 ///  connect to the driver. Starting, stopping, handling connections, allocating
@@ -39,39 +33,34 @@ const int kMaxQueueEvents = 64;
 ///  Documentation on how the IOUserClient parts of this code work can be found
 ///  here:
 ///  https://developer.apple.com/library/mac/samplecode/SimpleUserClient/Listings/User_Client_Info_txt.html
+///  https://developer.apple.com/library/mac/documentation/DeviceDrivers/Conceptual/WritingDeviceDriver/WritingDeviceDriver.pdf
 ///
 class com_google_SantaDriverClient : public IOUserClient {
   OSDeclareDefaultStructors(com_google_SantaDriverClient);
 
- private:
-  IOSharedDataQueue *fDataQueue;
-  IOMemoryDescriptor *fSharedMemory;
-  com_google_SantaDriver *fProvider;
-  SantaDecisionManager *fSDM;
-
  public:
   ///  Called as part of IOServiceOpen in clients
-  bool initWithTask(task_t owningTask, void *securityID, UInt32 type);
+  bool initWithTask(task_t owningTask, void *securityID, UInt32 type) override;
 
   ///  Called after initWithTask as part of IOServiceOpen
-  bool start(IOService *provider);
+  bool start(IOService *provider) override;
 
   ///  Called when this class is stopping
-  void stop(IOService *provider);
+  void stop(IOService *provider) override;
 
   ///  Called when a client disconnects
-  IOReturn clientClose();
+  IOReturn clientClose() override;
 
   ///  Called when the driver is shutting down
-  bool terminate(IOOptionBits options);
+  bool terminate(IOOptionBits options) override;
 
   ///  Called in clients with IOConnectSetNotificationPort
   IOReturn registerNotificationPort(
-      mach_port_t port, UInt32 type, UInt32 refCon);
+      mach_port_t port, UInt32 type, UInt32 refCon) override;
 
   ///  Called in clients with IOConnectMapMemory
   IOReturn clientMemoryForType(
-      UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory);
+      UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) override;
 
   ///  Called in clients with IOConnectCallScalarMethod etc. Dispatches
   ///  to the requested selector using the SantaDriverMethods enum in
@@ -80,7 +69,7 @@ class com_google_SantaDriverClient : public IOUserClient {
       UInt32 selector,
       IOExternalMethodArguments *arguments,
       IOExternalMethodDispatch *dispatch,
-      OSObject *target, void *reference);
+      OSObject *target, void *reference) override;
 
   ///
   ///  The userpsace callable methods are below. Each method corresponds
@@ -122,6 +111,10 @@ class com_google_SantaDriverClient : public IOUserClient {
       com_google_SantaDriverClient *target,
       void *reference,
       IOExternalMethodArguments *arguments);
+
+ private:
+  com_google_SantaDriver *myProvider;
+  SantaDecisionManager *decisionManager;
 };
 
 #endif  // SANTA__SANTA_DRIVER__SANTADRIVERUSERCLIENT_H

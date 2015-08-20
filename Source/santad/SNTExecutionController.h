@@ -13,6 +13,7 @@
 ///    limitations under the License.
 
 #include "SNTCommonEnums.h"
+#include "SNTKernelCommon.h"
 
 @class SNTCodesignChecker;
 @class SNTDriverManager;
@@ -37,12 +38,10 @@
 @property SNTRuleTable *ruleTable;
 @property SNTEventTable *eventTable;
 @property SNTXPCConnection *notifierConnection;
-@property santa_clientmode_t operatingMode;
 
 - (instancetype)initWithDriverManager:(SNTDriverManager *)driverManager
                             ruleTable:(SNTRuleTable *)ruleTable
                            eventTable:(SNTEventTable *)eventTable
-                        operatingMode:(santa_clientmode_t)operating_mode
                    notifierConnection:(SNTXPCConnection *)notifierConn;
 
 ///
@@ -50,15 +49,8 @@
 ///  the kernel, logs the event to the log and if necessary stores the event in the database and
 ///  sends a notification to the GUI agent.
 ///
-///  @param path the binary that's being executed
-///  @param userName the user who's executing the binary
-///  @param pid the process id being executed
-///  @param vnoteId the id of the vnode being executed
+///  @param message The message sent from the kernel.
 ///
-- (void)validateBinaryWithPath:(NSString *)path
-                      userName:(NSString *)userName
-                           pid:(NSNumber *)pid
-                       vnodeId:(uint64_t)vnodeId;
-
+- (void)validateBinaryWithMessage:(santa_message_t)message;
 
 @end

@@ -17,6 +17,7 @@
 #import <SecurityInterface/SFCertificatePanel.h>
 
 #import "SNTCertificate.h"
+#import "SNTConfigurator.h"
 #import "SNTFileInfo.h"
 #import "SNTMessageWindow.h"
 #import "SNTStoredEvent.h"
@@ -27,12 +28,24 @@
   self = [super initWithWindowNibName:@"MessageWindow"];
   if (self) {
     _event = event;
-    _customMessage = message;
-    [self.window setMovableByWindowBackground:NO];
-    [self.window setLevel:NSPopUpMenuWindowLevel];
-    [self.window center];
+    _customMessage = (message != (NSString *)[NSNull null] ? message : nil);
   }
   return self;
+}
+
+- (void)loadWindow {
+  [super loadWindow];
+  [self.window setLevel:NSPopUpMenuWindowLevel];
+  [self.window setMovableByWindowBackground:YES];
+
+  if (![[SNTConfigurator configurator] eventDetailURL]) {
+    [self.openEventButton removeFromSuperview];
+  } else {
+    NSString *eventDetailText = [[SNTConfigurator configurator] eventDetailText];
+    if (eventDetailText) {
+      [self.openEventButton setTitle:eventDetailText];
+    }
+  }
 }
 
 - (IBAction)showWindow:(id)sender {
@@ -62,14 +75,33 @@
                                                showGroup:YES];
 }
 
+- (IBAction)openEventDetails:(id)sender {
+  SNTConfigurator *config = [SNTConfigurator configurator];
+
+  NSString *formatStr = config.eventDetailURL;
+  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%file_sha%"
+                                                   withString:self.event.fileSHA256];
+  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%username%"
+                                                   withString:self.event.executingUser];
+  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%machine_id%"
+                                                   withString:config.machineID];
+
+  [self closeWindow:sender];
+  [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:formatStr]];
+}
+
 #pragma mark Generated properties
 
 + (NSSet *)keyPathsForValuesAffectingValueForKey:(NSString *)key {
-  if (! [key isEqualToString:@"event"]) {
+  if (![key isEqualToString:@"event"]) {
     return [NSSet setWithObject:@"event"];
   } else {
     return nil;
   }
+}
+
+- (NSString *)shortenedHash {
+  return [self.event.fileSHA256 substringWithRange:NSMakeRange(0, 10)];
 }
 
 - (NSString *)publisherInfo {
@@ -98,11 +130,14 @@
   NSString *htmlFooter = @"</body></html>";
 
   NSString *message;
-  if (self.customMessage && ![self.customMessage isEqual:@""]) {
+  if ([self.customMessage length] > 0) {
     message = self.customMessage;
   } else {
-    message = @"The following application has been blocked from executing<br />"
-              @"because its trustworthiness cannot be determined.";
+    message = [[SNTConfigurator configurator] defaultBlockMessage];
+    if (!message) {
+      message = @"The following application has been blocked from executing<br />"
+                @"because its trustworthiness cannot be determined.";
+    }
   }
 
   NSString *fullHTML = [NSString stringWithFormat:@"%@%@%@", htmlHeader, message, htmlFooter];
@@ -111,7 +146,6 @@
   NSAttributedString *returnStr = [[NSAttributedString alloc] initWithHTML:htmlData
                                                         documentAttributes:NULL];
   return returnStr;
-
 }
 
 @end
