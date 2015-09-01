@@ -108,8 +108,13 @@
     return;
   }
 
-  // Step 4 - default rule :-(
-  if (!rule) {
+  if ([binInfo isMissingPageZero]) {
+    // Check __PAGEZERO
+    LOGW(@"File has bad/missing __PAGEZERO segment. Denying execution");
+    respondedAction = ACTION_RESPOND_CHECKBW_DENY;
+    [self.driverManager postToKernelAction:ACTION_RESPOND_CHECKBW_DENY forVnodeID:vnodeId];
+  } else if (!rule) {
+    // Step 4 - default rule :-(
     respondedAction = [self defaultDecision];
     [self.driverManager postToKernelAction:respondedAction forVnodeID:vnodeId];
   }
