@@ -52,9 +52,12 @@ typedef enum {
   ACTION_RESPOND_CHECKBW_DENY = 12,
 
   // NOTIFY
-  ACTION_NOTIFY_EXEC_ALLOW_NODAEMON = 30,
-  ACTION_NOTIFY_EXEC_ALLOW_CACHED = 31,
-  ACTION_NOTIFY_EXEC_DENY_CACHED = 32,
+  ACTION_NOTIFY_EXEC = 20,
+  ACTION_NOTIFY_WRITE = 21,
+  ACTION_NOTIFY_RENAME = 22,
+  ACTION_NOTIFY_LINK = 23,
+  ACTION_NOTIFY_EXCHANGE = 24,
+  ACTION_NOTIFY_DELETE = 25,
 
   // SHUTDOWN
   ACTION_REQUEST_SHUTDOWN = 90,
@@ -70,10 +73,12 @@ typedef enum {
 typedef struct {
   santa_action_t action;
   uint64_t vnode_id;
-  uid_t userId;
+  uid_t uid;
+  gid_t gid;
   pid_t pid;
   pid_t ppid;
   char path[MAXPATHLEN];
+  char newpath[MAXPATHLEN];
 } santa_message_t;
 
 #endif  // SANTA__COMMON__KERNELCOMMON_H

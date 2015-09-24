@@ -21,8 +21,9 @@
 @property NSString *configFilePath;
 @property NSMutableDictionary *configData;
 
-/// Creating NSRegularExpression objects is not fast, so cache it.
+/// Creating NSRegularExpression objects is not fast, so cache them.
 @property NSRegularExpression *cachedWhitelistDirRegex;
+@property NSRegularExpression *cachedBlacklistDirRegex;
 
 /// Array of keys that cannot be changed while santad is running if santad didn't make the change.
 @property(readonly) NSArray *protectedKeys;
@@ -36,7 +37,8 @@ NSString * const kDefaultConfigFilePath = @"/var/db/santa/config.plist";
 /// The keys in the config file
 static NSString * const kClientModeKey = @"ClientMode";
 static NSString * const kWhitelistRegexKey = @"WhitelistRegex";
-static NSString * const kLogAllEventsKey = @"LogAllEvents";
+static NSString * const kBlacklistRegexKey = @"BlacklistRegex";
+static NSString * const kLogFileChangesKey = @"LogFileChanges";
 
 static NSString * const kMoreInfoURLKey = @"MoreInfoURL";
 static NSString * const kEventDetailURLKey = @"EventDetailURL";
@@ -83,7 +85,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 #pragma mark Protected Keys
 
 - (NSArray *)protectedKeys {
-  return @[ kClientModeKey, kWhitelistRegexKey ];
+  return @[ kClientModeKey, kWhitelistRegexKey, kBlacklistRegexKey, kLogFileChangesKey ];
 }
 
 #pragma mark Public Interface
@@ -111,7 +113,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
     if (![re hasPrefix:@"^"]) re = [@"^" stringByAppendingString:re];
     self.cachedWhitelistDirRegex = [NSRegularExpression regularExpressionWithPattern:re
                                                                              options:0
-                                                                               error:nil];
+                                                                               error:NULL];
   }
   return self.cachedWhitelistDirRegex;
 }
@@ -126,12 +128,33 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
   [self saveConfigToDisk];
 }
 
-- (BOOL)logAllEvents {
-  return [self.configData[kLogAllEventsKey] boolValue];
+- (NSRegularExpression *)blacklistPathRegex {
+  if (!self.cachedBlacklistDirRegex && self.configData[kBlacklistRegexKey]) {
+    NSString *re = self.configData[kBlacklistRegexKey];
+    if (![re hasPrefix:@"^"]) re = [@"^" stringByAppendingString:re];
+    self.cachedBlacklistDirRegex = [NSRegularExpression regularExpressionWithPattern:re
+                                                                             options:0
+                                                                               error:NULL];
+  }
+  return self.cachedBlacklistDirRegex;
 }
 
-- (void)setLogAllEvents:(BOOL)logAllEvents {
-  self.configData[kLogAllEventsKey] = @(logAllEvents);
+- (void)setBlacklistPathRegex:(NSRegularExpression *)re {
+  if (!re) {
+    [self.configData removeObjectForKey:kBlacklistRegexKey];
+  } else {
+    self.configData[kBlacklistRegexKey] = [re pattern];
+  }
+  self.cachedBlacklistDirRegex = nil;
+  [self saveConfigToDisk];
+}
+
+- (BOOL)logFileChanges {
+  return [self.configData[kLogFileChangesKey] boolValue];
+}
+
+- (void)setLogFileChanges:(BOOL)logFileChanges {
+  self.configData[kLogFileChangesKey] = @(logFileChanges);
   [self saveConfigToDisk];
 }
 
@@ -218,8 +241,6 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 }
 
 - (void)reloadConfigData {
-  if (!self.configData) self.configData = [NSMutableDictionary dictionary];
-
   NSFileManager *fm = [NSFileManager defaultManager];
   if (![fm fileExistsAtPath:self.configFilePath]) return;
 
@@ -242,20 +263,29 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
     return;
   }
 
-  // Ensure no-one is trying to change protected keys behind our back.
-  NSMutableDictionary *configDataMutable = [configData mutableCopy];
-  BOOL changed = NO;
-  for (NSString *key in self.protectedKeys) {
-    if (self.configData[key] && configData[key] &&
-        ![self.configData[key] isEqual:configData[key]] && geteuid() == 0) {
-      NSMutableDictionary *configDataMutable = [configData mutableCopy];
-      configDataMutable[key] = self.configData[key];
-      changed = YES;
-      LOGD(@"Ignoring changed configuration key: %@", key);
+  if (!self.configData) {
+    self.configData = [configData mutableCopy];
+  } else {
+    // Ensure no-one is trying to change protected keys behind our back.
+    NSMutableDictionary *configDataMutable = [configData mutableCopy];
+    BOOL changed = NO;
+    for (NSString *key in self.protectedKeys) {
+      if (geteuid() == 0 &&
+          ((self.configData[key] && !configData[key]) ||
+           (!self.configData[key] && configData[key]) ||
+           (self.configData[key] && ![self.configData[key] isEqual:configData[key]]))) {
+        if (self.configData[key]) {
+          configDataMutable[key] = self.configData[key];
+        } else {
+          [configDataMutable removeObjectForKey:key];
+        }
+        changed = YES;
+        LOGI(@"Ignoring changed configuration key: %@", key);
+      }
     }
+    self.configData = configDataMutable;
+    if (changed) [self saveConfigToDisk];
   }
-  self.configData = configDataMutable;
-  if (changed) [self saveConfigToDisk];
 }
 
 #pragma mark Private

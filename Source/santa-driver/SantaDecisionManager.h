@@ -101,9 +101,8 @@ class SantaDecisionManager : public OSObject {
   ///
   ///  FileOp Callback
   ///  @param vp The Vnode for this request.
-  ///  @return int Should always be KAUTH_RESULT_DEFER.
   ///
-  int FileOpCallback(const vnode_t vp);
+  void FileOpCallback(kauth_action_t action, const vnode_t vp, const char *path, const char *new_path);
 
  protected:
   ///
@@ -151,7 +150,7 @@ class SantaDecisionManager : public OSObject {
   ///  @param identifier The vnode ID string for this request
   ///  @return santa_action_t The response for this request
   ///
-  santa_action_t GetFromDaemon(const santa_message_t message,
+  santa_action_t GetFromDaemon(santa_message_t *message,
                                const char *identifier);
 
   ///
@@ -176,7 +175,7 @@ class SantaDecisionManager : public OSObject {
   ///  @param message The message to send
   ///  @return bool true if sending was successful.
   ///
-  bool PostToQueue(santa_message_t message);
+  bool PostToQueue(santa_message_t *message);
 
   ///
   ///  Fetches the vnode_id for a given vnode.
@@ -187,11 +186,19 @@ class SantaDecisionManager : public OSObject {
   ///
   uint64_t GetVnodeIDForVnode(const vfs_context_t ctx, const vnode_t vp);
 
+  ///
+  ///  Creates a new santa_message_t with some fields pre-filled.
+  ///
+  santa_message_t* NewMessage();
+
   ///  Returns the current system uptime in microseconds
   static uint64_t GetCurrentUptime();
 
  private:
   lck_grp_t *sdm_lock_grp_;
+  lck_grp_attr_t *sdm_lock_grp_attr_;
+
+  lck_attr_t *sdm_lock_attr_;
   lck_rw_t *cached_decisions_lock_;
   lck_mtx_t *dataqueue_lock_;
 

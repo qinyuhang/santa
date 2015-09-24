@@ -31,9 +31,9 @@ extern NSString * const kDefaultConfigFilePath;
 @property(nonatomic) santa_clientmode_t clientMode;
 
 ///
-///  Whether or not to log all events, even for whitelisted binaries.
+///  If set to NO, file writes won't be logged. Defaults to YES.
 ///
-@property(nonatomic) BOOL logAllEvents;
+@property(nonatomic) BOOL logFileChanges;
 
 ///
 ///  The regex of whitelisted paths. Regexes are specified in ICU format.
@@ -43,6 +43,15 @@ extern NSString * const kDefaultConfigFilePath;
 ///  If the regex doesn't begin with ^ to match from the beginning of the line, it will be added.
 ///
 @property(nonatomic) NSRegularExpression *whitelistPathRegex;
+
+///
+///  The regex of blacklisted paths. Regexes are specified in ICU format.
+///
+///  The regex flags IXSM can be used, though the s (dotall) and m (multiline) flags are
+///  pointless as a path only ever has a single line.
+///  If the regex doesn't begin with ^ to match from the beginning of the line, it will be added.
+///
+@property(nonatomic) NSRegularExpression *blacklistPathRegex;
 
 #pragma mark - GUI Settings
 
