@@ -23,6 +23,10 @@
 #import "SNTRule.h"
 #import "SNTRuleTable.h"
 
+// Globals used by the santad watchdog thread
+uint64_t watchdogCPUEvents = 0;
+uint64_t watchdogRAMEvents = 0;
+
 @interface SNTDaemonControlController ()
 @property dispatch_source_t syncTimer;
 @end
@@ -140,12 +144,38 @@
   reply();
 }
 
+- (void)setSyncLastSuccess:(NSDate *)date reply:(void (^)())reply {
+  [[SNTConfigurator configurator] setSyncLastSuccess:date];
+  reply();
+}
+
+- (void)setSyncCleanRequired:(BOOL)cleanReqd reply:(void (^)())reply {
+  [[SNTConfigurator configurator] setSyncCleanRequired:cleanReqd];
+  reply();
+}
+
 - (void)setWhitelistPathRegex:(NSString *)pattern reply:(void (^)())reply {
   NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:pattern
                                                                       options:0
                                                                         error:NULL];
   [[SNTConfigurator configurator] setWhitelistPathRegex:re];
   reply();
+}
+
+- (void)setBlacklistPathRegex:(NSString *)pattern reply:(void (^)())reply {
+  NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:pattern
+                                                                      options:0
+                                                                        error:NULL];
+  [[SNTConfigurator configurator] setBlacklistPathRegex:re];
+  reply();
+}
+
+- (void)watchdogCPUEvents:(void (^)(uint64_t))reply {
+  reply(watchdogCPUEvents);
+}
+
+- (void)watchdogRAMEvents:(void (^)(uint64_t))reply {
+  reply(watchdogRAMEvents);
 }
 
 @end

@@ -19,6 +19,9 @@
 
 #import "SNTApplication.h"
 
+extern uint64_t watchdogCPUEvents;
+extern uint64_t watchdogRAMEvents;
+
 ///  Converts a timeval struct to double, converting the microseconds value to seconds.
 static inline double timeval_to_double(struct timeval tv) {
   return (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
@@ -59,6 +62,7 @@ void *watchdogThreadFunction(__unused void *idata) {
       if (percentage > cpuWarnThreshold) {
         LOGW(@"Watchdog: potentially high CPU use, ~%.2f%% over last %d seconds.",
              percentage, timeInterval);
+        watchdogCPUEvents++;
       }
 
       // RAM
@@ -67,6 +71,7 @@ void *watchdogThreadFunction(__unused void *idata) {
         double ramUseMB = (double) taskInfo.resident_size / 1024 / 1024;
         if (ramUseMB > memWarnThreshold && ramUseMB > prevRamUseMB) {
           LOGW(@"Watchdog: potentially high RAM use, RSS is %.2fMB.", ramUseMB);
+          watchdogRAMEvents++;
         }
         prevRamUseMB = ramUseMB;
       }
@@ -86,10 +91,6 @@ int main(int argc, const char *argv[]) {
       printf("%s\n", [infoDict[@"CFBundleVersion"] UTF8String]);
       return 0;
     }
-
-    // Close stdout/stderr so logging goes to syslog
-    fclose(stdout);
-    fclose(stderr);
 
     LOGI(@"Started, version %@", infoDict[@"CFBundleVersion"]);
 

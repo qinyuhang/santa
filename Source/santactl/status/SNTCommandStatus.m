@@ -14,6 +14,7 @@
 
 #import "SNTCommandController.h"
 
+#import "SNTConfigurator.h"
 #import "SNTXPCConnection.h"
 #import "SNTXPCControlInterface.h"
 
@@ -41,8 +42,12 @@ REGISTER_COMMAND_NAME(@"status")
 }
 
 + (void)runWithArguments:(NSArray *)arguments daemonConnection:(SNTXPCConnection *)daemonConn {
+  dispatch_group_t group = dispatch_group_create();
+
   // Daemon status
   __block NSString *clientMode;
+  __block uint64_t cpuEvents, ramEvents;
+  dispatch_group_enter(group);
   [[daemonConn remoteObjectProxy] clientMode:^(santa_clientmode_t cm) {
       switch (cm) {
         case CLIENTMODE_MONITOR:
@@ -52,35 +57,70 @@ REGISTER_COMMAND_NAME(@"status")
         default:
           clientMode = [NSString stringWithFormat:@"Unknown (%d)", cm]; break;
       }
+      dispatch_group_leave(group);
   }];
-  do { usleep(5000); } while (!clientMode);
-  printf(">>> Daemon Info\n");
-  printf("  %-25s | %s\n", "Mode", [clientMode UTF8String]);
+  dispatch_group_enter(group);
+  [[daemonConn remoteObjectProxy] watchdogCPUEvents:^(uint64_t events) {
+    cpuEvents = events;
+    dispatch_group_leave(group);
+  }];
+  dispatch_group_enter(group);
+  [[daemonConn remoteObjectProxy] watchdogRAMEvents:^(uint64_t events) {
+    ramEvents = events;
+    dispatch_group_leave(group);
+  }];
+  char *fileLogging = ([[SNTConfigurator configurator] fileChangesRegex] ? "Enabled" : "Disabled");
 
   // Kext status
   __block int64_t cacheCount = -1;
+  dispatch_group_enter(group);
   [[daemonConn remoteObjectProxy] cacheCount:^(int64_t count) {
       cacheCount = count;
+      dispatch_group_leave(group);
   }];
-  do { usleep(5000); } while (cacheCount == -1);
-  printf(">>> Kernel Info\n");
-  printf("  %-25s | %lld\n", "Kernel cache count", cacheCount);
 
   // Database counts
   __block int64_t eventCount = -1, binaryRuleCount = -1, certRuleCount = -1;
+  dispatch_group_enter(group);
   [[daemonConn remoteObjectProxy] databaseRuleCounts:^(int64_t binary, int64_t certificate) {
       binaryRuleCount = binary;
       certRuleCount = certificate;
+      dispatch_group_leave(group);
   }];
+  dispatch_group_enter(group);
   [[daemonConn remoteObjectProxy] databaseEventCount:^(int64_t count) {
       eventCount = count;
+      dispatch_group_leave(group);
   }];
-  do { usleep(5000); } while (eventCount == -1 || binaryRuleCount == -1 || certRuleCount == -1);
 
+  // Sync status
+  NSString *syncURLStr = [[[SNTConfigurator configurator] syncBaseURL] absoluteString];
+  NSString *lastSyncSuccess = [[[SNTConfigurator configurator] syncLastSuccess] description];
+  BOOL syncCleanReqd = [[SNTConfigurator configurator] syncCleanRequired];
+
+  if (dispatch_group_wait(group, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC * 5))) {
+    printf("Failed to retrieve some stats from daemon\n\n");
+  }
+
+  printf(">>> Daemon Info\n");
+  printf("  %-22s | %s\n", "Mode", [clientMode UTF8String]);
+  printf("  %-22s | %s\n", "File Logging", fileLogging);
+  printf("  %-22s | %lld\n", "Watchdog CPU Events", cpuEvents);
+  printf("  %-22s | %lld\n", "Watchdog RAM Events", ramEvents);
+  printf(">>> Kernel Info\n");
+  printf("  %-22s | %lld\n", "Kernel cache count", cacheCount);
   printf(">>> Database Info\n");
-  printf("  %-25s | %lld\n", "Binary Rules", binaryRuleCount);
-  printf("  %-25s | %lld\n", "Certificate Rules", certRuleCount);
-  printf("  %-25s | %lld\n", "Events Pending Upload", eventCount);
+  printf("  %-22s | %lld\n", "Binary Rules", binaryRuleCount);
+  printf("  %-22s | %lld\n", "Certificate Rules", certRuleCount);
+  printf("  %-22s | %lld\n", "Events Pending Upload", eventCount);
+
+  if (syncURLStr) {
+    printf(">>> Sync Info\n");
+    printf("  %-22s | %s\n", "Sync Server", [syncURLStr UTF8String]);
+    printf("  %-22s | %s\n", "Clean Sync Required", (syncCleanReqd ? "Yes" : "No"));
+    const char *syncDateStr = (lastSyncSuccess ? [lastSyncSuccess UTF8String] : "Never");
+    printf("  %-22s | %s\n", "Last Successful Sync", syncDateStr);
+  }
 
   exit(0);
 }

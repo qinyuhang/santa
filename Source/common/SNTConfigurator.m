@@ -22,6 +22,7 @@
 @property NSMutableDictionary *configData;
 
 /// Creating NSRegularExpression objects is not fast, so cache them.
+@property NSRegularExpression *cachedFileChangesRegex;
 @property NSRegularExpression *cachedWhitelistDirRegex;
 @property NSRegularExpression *cachedBlacklistDirRegex;
 
@@ -36,9 +37,9 @@ NSString * const kDefaultConfigFilePath = @"/var/db/santa/config.plist";
 
 /// The keys in the config file
 static NSString * const kClientModeKey = @"ClientMode";
+static NSString * const kFileChangesRegexKey = @"FileChangesRegex";
 static NSString * const kWhitelistRegexKey = @"WhitelistRegex";
 static NSString * const kBlacklistRegexKey = @"BlacklistRegex";
-static NSString * const kLogFileChangesKey = @"LogFileChanges";
 
 static NSString * const kMoreInfoURLKey = @"MoreInfoURL";
 static NSString * const kEventDetailURLKey = @"EventDetailURL";
@@ -46,6 +47,8 @@ static NSString * const kEventDetailTextKey = @"EventDetailText";
 static NSString * const kDefaultBlockMessage = @"DefaultBlockMessage";
 
 static NSString * const kSyncBaseURLKey = @"SyncBaseURL";
+static NSString * const kSyncLastSuccess = @"SyncLastSuccess";
+static NSString * const kSyncCleanRequired = @"SyncCleanRequired";
 static NSString * const kClientAuthCertificateFileKey = @"ClientAuthCertificateFile";
 static NSString * const kClientAuthCertificatePasswordKey = @"ClientAuthCertificatePassword";
 static NSString * const kClientAuthCertificateCNKey = @"ClientAuthCertificateCN";
@@ -85,7 +88,8 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 #pragma mark Protected Keys
 
 - (NSArray *)protectedKeys {
-  return @[ kClientModeKey, kWhitelistRegexKey, kBlacklistRegexKey, kLogFileChangesKey ];
+  return @[ kClientModeKey, kWhitelistRegexKey, kBlacklistRegexKey,
+            kFileChangesRegexKey, kSyncBaseURLKey ];
 }
 
 #pragma mark Public Interface
@@ -149,12 +153,24 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
   [self saveConfigToDisk];
 }
 
-- (BOOL)logFileChanges {
-  return [self.configData[kLogFileChangesKey] boolValue];
+- (NSRegularExpression *)fileChangesRegex {
+  if (!self.cachedFileChangesRegex && self.configData[kFileChangesRegexKey]) {
+    NSString *re = self.configData[kFileChangesRegexKey];
+    if (![re hasPrefix:@"^"]) re = [@"^" stringByAppendingString:re];
+    self.cachedFileChangesRegex = [NSRegularExpression regularExpressionWithPattern:re
+                                                                            options:0
+                                                                              error:NULL];
+  }
+  return self.cachedFileChangesRegex;
 }
 
-- (void)setLogFileChanges:(BOOL)logFileChanges {
-  self.configData[kLogFileChangesKey] = @(logFileChanges);
+- (void)setFileChangesRegex:(NSRegularExpression *)re {
+  if (!re) {
+    [self.configData removeObjectForKey:kFileChangesRegexKey];
+  } else {
+    self.configData[kFileChangesRegexKey] = [re pattern];
+  }
+  self.cachedFileChangesRegex = nil;
   [self saveConfigToDisk];
 }
 
@@ -200,6 +216,24 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 
 - (NSString *)syncServerAuthRootsFile {
   return self.configData[kServerAuthRootsFileKey];
+}
+
+- (NSDate *)syncLastSuccess {
+  return self.configData[kSyncLastSuccess];
+}
+
+- (void)setSyncLastSuccess:(NSDate *)syncLastSuccess {
+  self.configData[kSyncLastSuccess] = syncLastSuccess;
+  [self saveConfigToDisk];
+}
+
+- (BOOL)syncCleanRequired {
+  return [self.configData[kSyncCleanRequired] boolValue];
+}
+
+- (void)setSyncCleanRequired:(BOOL)syncCleanRequired {
+  self.configData[kSyncCleanRequired] = @(syncCleanRequired);
+  [self saveConfigToDisk];
 }
 
 - (NSString *)machineOwner {
@@ -255,7 +289,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 
   NSDictionary *configData =
       [NSPropertyListSerialization propertyListWithData:readData
-                                                options:kCFPropertyListImmutable
+                                                options:NSPropertyListImmutable
                                                  format:NULL
                                                   error:&error];
   if (error) {
@@ -265,7 +299,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 
   if (!self.configData) {
     self.configData = [configData mutableCopy];
-  } else {
+  } else if (self.syncBaseURL) {
     // Ensure no-one is trying to change protected keys behind our back.
     NSMutableDictionary *configDataMutable = [configData mutableCopy];
     BOOL changed = NO;
