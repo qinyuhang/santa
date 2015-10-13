@@ -14,7 +14,7 @@
 
 #import "SNTEventLog.h"
 
-#include <sys/stat.h>
+#include <libproc.h>
 #include <sys/sysctl.h>
 
 #import "SNTCachedDecision.h"
@@ -69,11 +69,8 @@
     }
     case ACTION_NOTIFY_WRITE: {
       action = @"WRITE";
-      struct stat filestat;
-      stat(message.path, &filestat);
-
-      if (filestat.st_size < 1024 * 1024) {
-        SNTFileInfo *fileInfo = [[SNTFileInfo alloc] initWithPath:path];
+      SNTFileInfo *fileInfo = [[SNTFileInfo alloc] initWithPath:path];
+      if (fileInfo.fileSize < 1024 * 1024) {
         sha256 = fileInfo.SHA256;
       } else {
         sha256 = @"(too large)";
@@ -87,8 +84,13 @@
   if (newpath) {
     outStr = [outStr stringByAppendingFormat:@"|newpath=%@", [self sanitizeString:newpath]];
   }
-  outStr = [outStr stringByAppendingFormat:@"|pid=%d|ppid=%d|uid=%d|gid=%d",
-               message.pid, message.ppid, message.uid, message.gid];
+  char ppath[PATH_MAX];
+  if (proc_pidpath(message.pid, ppath, PATH_MAX) < 1) {
+    strncpy(ppath, "(null)", 6);
+  }
+  outStr =
+      [outStr stringByAppendingFormat:@"|pid=%d|ppid=%d|process=%s|processpath=%s|uid=%d|gid=%d",
+          message.pid, message.ppid, message.pname, ppath, message.uid, message.gid];
   if (sha256) {
     outStr = [outStr stringByAppendingFormat:@"|sha256=%@", sha256];
   }
