@@ -17,7 +17,7 @@
 #include "SNTLogging.h"
 
 #import "NSData+Zlib.h"
-#import "SNTCertificate.h"
+#import "MOLCertificate.h"
 #import "SNTCommandSyncConstants.h"
 #import "SNTCommandSyncState.h"
 #import "SNTStoredEvent.h"
@@ -174,9 +174,14 @@
   ADDKEY(newEvent, kPPID, event.ppid);
   ADDKEY(newEvent, kParentName, event.parentName);
 
+  ADDKEY(newEvent, kQuarantineDataURL, event.quarantineDataURL);
+  ADDKEY(newEvent, kQuarantineRefererURL, event.quarantineRefererURL);
+  ADDKEY(newEvent, kQuarantineTimestamp, @([event.quarantineTimestamp timeIntervalSince1970]));
+  ADDKEY(newEvent, kQuarantineAgentBundleID, event.quarantineAgentBundleID);
+
   NSMutableArray *signingChain = [NSMutableArray arrayWithCapacity:event.signingChain.count];
   for (NSUInteger i = 0; i < event.signingChain.count; i++) {
-    SNTCertificate *cert = [event.signingChain objectAtIndex:i];
+    MOLCertificate *cert = [event.signingChain objectAtIndex:i];
 
     NSMutableDictionary *certDict = [NSMutableDictionary dictionary];
     ADDKEY(certDict, kCertSHA256, cert.SHA256);

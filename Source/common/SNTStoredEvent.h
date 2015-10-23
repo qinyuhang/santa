@@ -55,7 +55,7 @@
 @property NSString *fileBundleVersionString;
 
 ///
-///  If the executed file was signed, this is an NSArray of SNTCertificate's
+///  If the executed file was signed, this is an NSArray of MOLCertificate's
 ///  representing the signing chain.
 ///
 @property NSArray *signingChain;
@@ -99,5 +99,14 @@
 ///  The name of the parent process.
 ///
 @property NSString *parentName;
+
+///
+///  Quarantine data about the executed file, if any.
+///
+@property NSString *quarantineDataURL;
+@property NSString *quarantineRefererURL;
+@property NSDate *quarantineTimestamp;
+@property NSString *quarantineAgentBundleID;
+
 
 @end
