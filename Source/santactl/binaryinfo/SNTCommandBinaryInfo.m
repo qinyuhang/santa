@@ -60,14 +60,17 @@ REGISTER_COMMAND_NAME(@"binaryinfo")
   }
 
   NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-  dateFormatter.dateFormat = @"YYYY/MM/dd HH:mm:ss Z";
+  dateFormatter.dateFormat = @"yyyy/MM/dd HH:mm:ss Z";
 
   [self printKey:@"Path" value:fileInfo.path];
   [self printKey:@"SHA-256" value:fileInfo.SHA256];
   [self printKey:@"SHA-1" value:fileInfo.SHA1];
-  [self printKey:@"Bundle Name" value:fileInfo.bundleName];
-  [self printKey:@"Bundle Version" value:fileInfo.bundleVersion];
-  [self printKey:@"Bundle Version Str" value:fileInfo.bundleShortVersionString];
+
+  if (fileInfo.bundlePath) {
+    [self printKey:@"Bundle Name" value:fileInfo.bundleName];
+    [self printKey:@"Bundle Version" value:fileInfo.bundleVersion];
+    [self printKey:@"Bundle Version Str" value:fileInfo.bundleShortVersionString];
+  }
 
   if (fileInfo.quarantineDataURL) {
     [self printKey:@"Download Referer URL" value:fileInfo.quarantineRefererURL];

@@ -26,6 +26,8 @@
 // Globals used by the santad watchdog thread
 uint64_t watchdogCPUEvents = 0;
 uint64_t watchdogRAMEvents = 0;
+double watchdogCPUPeak = 0;
+double watchdogRAMPeak = 0;
 
 @interface SNTDaemonControlController ()
 @property dispatch_source_t syncTimer;
@@ -172,12 +174,8 @@ uint64_t watchdogRAMEvents = 0;
   reply();
 }
 
-- (void)watchdogCPUEvents:(void (^)(uint64_t))reply {
-  reply(watchdogCPUEvents);
-}
-
-- (void)watchdogRAMEvents:(void (^)(uint64_t))reply {
-  reply(watchdogRAMEvents);
+- (void)watchdogInfo:(void (^)(uint64_t, uint64_t, double, double))reply {
+  reply(watchdogCPUEvents, watchdogRAMEvents, watchdogCPUPeak, watchdogRAMPeak);
 }
 
 @end
