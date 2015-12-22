@@ -14,7 +14,9 @@
 
 #import "SNTEventLog.h"
 
+#include <grp.h>
 #include <libproc.h>
+#include <pwd.h>
 #include <sys/sysctl.h>
 
 #import "SNTCachedDecision.h"
@@ -88,9 +90,17 @@
   if (proc_pidpath(message.pid, ppath, PATH_MAX) < 1) {
     strncpy(ppath, "(null)", 6);
   }
-  outStr =
-      [outStr stringByAppendingFormat:@"|pid=%d|ppid=%d|process=%s|processpath=%s|uid=%d|gid=%d",
-          message.pid, message.ppid, message.pname, ppath, message.uid, message.gid];
+
+  NSString *user, *group;
+  struct passwd *pw = getpwuid(message.uid);
+  if (pw) user = @(pw->pw_name);
+  struct group *gr = getgrgid(message.gid);
+  if (gr) group = @(gr->gr_name);
+
+  outStr = [outStr stringByAppendingFormat:(@"|pid=%d|ppid=%d|process=%s|processpath=%s|"
+                                            @"uid=%d|user=%@|gid=%d|group=%@"),
+               message.pid, message.ppid, message.pname, ppath,
+               message.uid, user, message.gid, group];
   if (sha256) {
     outStr = [outStr stringByAppendingFormat:@"|sha256=%@", sha256];
   }
@@ -145,8 +155,14 @@
                  cd.certSHA256, [self sanitizeString:cd.certCommonName]];
   }
 
-  outLog = [outLog stringByAppendingFormat:@"|pid=%d|ppid=%d|uid=%d|gid=%d",
-               message.pid, message.ppid, message.uid, message.gid];
+  NSString *user, *group;
+  struct passwd *pw = getpwuid(message.uid);
+  if (pw) user = @(pw->pw_name);
+  struct group *gr = getgrgid(message.gid);
+  if (gr) group = @(gr->gr_name);
+
+  outLog = [outLog stringByAppendingFormat:@"|pid=%d|ppid=%d|uid=%d|user=%@|gid=%d|group=%@",
+               message.pid, message.ppid, message.uid, user, message.gid, group];
 
   LOGI(@"%@", outLog);
 }
@@ -205,7 +221,7 @@
   NSMutableArray *args = [NSMutableArray arrayWithCapacity:argc];
   for (int i = 0; i < argc; i++) {
     NSString *arg = @(cp);
-    [args addObject:arg];
+    if (arg) [args addObject:arg];
 
     // Move the pointer past this string and the terminator at the end.
     cp += strlen(cp) + 1;
