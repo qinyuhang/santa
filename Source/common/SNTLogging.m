@@ -15,6 +15,7 @@
 #import "SNTLogging.h"
 
 #import <asl.h>
+#import <pthread.h>
 
 #ifdef DEBUG
 static LogLevel logLevel = LOG_LEVEL_DEBUG;
@@ -22,24 +23,31 @@ static LogLevel logLevel = LOG_LEVEL_DEBUG;
 static LogLevel logLevel = LOG_LEVEL_INFO;  // default to info
 #endif
 
+void syslogClientDestructor(void *arg) {
+  asl_close((aslclient)arg);
+}
+
 void logMessage(LogLevel level, FILE *destination, NSString *format, ...) {
   static BOOL useSyslog = NO;
   static const char *binaryName;
   static dispatch_once_t pred;
+  static pthread_key_t syslogKey = 0;
 
   dispatch_once(&pred, ^{
-      binaryName = [[[NSProcessInfo processInfo] processName] UTF8String];
+    binaryName = [[[NSProcessInfo processInfo] processName] UTF8String];
 
-      // If debug logging is enabled, the process must be restarted.
-      if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--debug"]) {
-        logLevel = LOG_LEVEL_DEBUG;
-      }
+    // If debug logging is enabled, the process must be restarted.
+    if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--debug"]) {
+      logLevel = LOG_LEVEL_DEBUG;
+    }
 
-      // If requested, redirect output to syslog.
-      if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--syslog"] ||
-          strcmp(binaryName, "santad") == 0) {
-        useSyslog = YES;
-      }
+    // If requested, redirect output to syslog.
+    if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--syslog"] ||
+        strcmp(binaryName, "santad") == 0) {
+      useSyslog = YES;
+
+      pthread_key_create(&syslogKey, syslogClientDestructor);
+    }
   });
 
   if (logLevel < level) return;
@@ -50,20 +58,35 @@ void logMessage(LogLevel level, FILE *destination, NSString *format, ...) {
   va_end(args);
 
   if (useSyslog) {
-    aslclient client = asl_open(NULL, "com.google.santa", 0);
-    asl_set_filter(client, ASL_FILTER_MASK_UPTO(ASL_LEVEL_DEBUG));
+    aslclient client = (aslclient)pthread_getspecific(syslogKey);
+    if (client == NULL) {
+      client = asl_open(NULL, "com.google.santa", 0);
+      asl_set_filter(client, ASL_FILTER_MASK_UPTO(ASL_LEVEL_DEBUG));
+      pthread_setspecific(syslogKey, client);
+    }
 
     char *levelName;
     int syslogLevel = ASL_LEVEL_DEBUG;
     switch (level) {
-      case LOG_LEVEL_ERROR: levelName = "E"; syslogLevel = ASL_LEVEL_ERR; break;
-      case LOG_LEVEL_WARN: levelName = "W"; syslogLevel = ASL_LEVEL_WARNING; break;
-      case LOG_LEVEL_INFO: levelName = "I"; syslogLevel = ASL_LEVEL_INFO; break;
-      case LOG_LEVEL_DEBUG: levelName = "D"; syslogLevel = ASL_LEVEL_DEBUG; break;
+      case LOG_LEVEL_ERROR:
+        levelName = "E";
+        syslogLevel = ASL_LEVEL_ERR;
+        break;
+      case LOG_LEVEL_WARN:
+        levelName = "W";
+        syslogLevel = ASL_LEVEL_WARNING;
+        break;
+      case LOG_LEVEL_INFO:
+        levelName = "I";
+        syslogLevel = ASL_LEVEL_INFO;
+        break;
+      case LOG_LEVEL_DEBUG:
+        levelName = "D";
+        syslogLevel = ASL_LEVEL_DEBUG;
+        break;
     }
 
     asl_log(client, NULL, syslogLevel, "%s %s: %s", levelName, binaryName, [s UTF8String]);
-    asl_close(client);
   } else {
     fprintf(destination, "%s\n", [s UTF8String]);
   }

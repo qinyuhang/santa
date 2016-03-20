@@ -19,6 +19,7 @@
 #import "SNTFileWatcher.h"
 #import "SNTNotificationManager.h"
 #import "SNTXPCConnection.h"
+#import "SNTXPCControlInterface.h"
 
 @interface SNTAppDelegate ()
 @property SNTAboutWindowController *aboutWindowController;
@@ -36,7 +37,7 @@
 
   self.configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath
                                                             handler:^{
-      [[SNTConfigurator configurator] reloadConfigData];
+    [[SNTConfigurator configurator] reloadConfigData];
   }];
 
   self.notificationManager = [[SNTNotificationManager alloc] init];
@@ -47,16 +48,15 @@
                                       object:nil
                                        queue:[NSOperationQueue currentQueue]
                                   usingBlock:^(NSNotification *note) {
-      self.listener.invalidationHandler = nil;
-      self.listener.rejectedHandler = nil;
-      [self.listener invalidate];
-      self.listener = nil;
+    self.listener.invalidationHandler = nil;
+    [self.listener invalidate];
+    self.listener = nil;
   }];
   [workspaceNotifications addObserverForName:NSWorkspaceSessionDidBecomeActiveNotification
                                       object:nil
                                        queue:[NSOperationQueue currentQueue]
                                   usingBlock:^(NSNotification *note) {
-      [self attemptReconnection];
+    [self attemptReconnection];
   }];
 
   [self createConnection];
@@ -74,15 +74,18 @@
   dispatch_async(dispatch_get_main_queue(), ^{
     __weak __typeof(self) weakSelf = self;
 
-    self.listener = [[SNTXPCConnection alloc] initClientWithName:[SNTXPCNotifierInterface serviceId]
-                                                         options:NSXPCConnectionPrivileged];
+    NSXPCListener *listener = [NSXPCListener anonymousListener];
+    self.listener = [[SNTXPCConnection alloc] initServerWithListener:listener];
     self.listener.exportedInterface = [SNTXPCNotifierInterface notifierInterface];
     self.listener.exportedObject = self.notificationManager;
-    self.listener.rejectedHandler = ^{
-        [weakSelf attemptReconnection];
+    self.listener.invalidationHandler = ^{
+      [weakSelf attemptReconnection];
     };
-    self.listener.invalidationHandler = self.listener.rejectedHandler;
     [self.listener resume];
+
+    SNTXPCConnection *daemonConn = [SNTXPCControlInterface configuredConnection];
+    [daemonConn resume];
+    [[daemonConn remoteObjectProxy] setNotificationListener:listener.endpoint];
   });
 }
 

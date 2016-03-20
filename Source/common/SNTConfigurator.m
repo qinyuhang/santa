@@ -33,39 +33,39 @@
 @implementation SNTConfigurator
 
 /// The hard-coded path to the config file
-NSString * const kDefaultConfigFilePath = @"/var/db/santa/config.plist";
+NSString *const kDefaultConfigFilePath = @"/var/db/santa/config.plist";
 
 /// The keys in the config file
-static NSString * const kClientModeKey = @"ClientMode";
-static NSString * const kFileChangesRegexKey = @"FileChangesRegex";
-static NSString * const kWhitelistRegexKey = @"WhitelistRegex";
-static NSString * const kBlacklistRegexKey = @"BlacklistRegex";
-static NSString * const kEnablePageZeroProtectionKey = @"EnablePageZeroProtection";
+static NSString *const kClientModeKey = @"ClientMode";
+static NSString *const kFileChangesRegexKey = @"FileChangesRegex";
+static NSString *const kWhitelistRegexKey = @"WhitelistRegex";
+static NSString *const kBlacklistRegexKey = @"BlacklistRegex";
+static NSString *const kEnablePageZeroProtectionKey = @"EnablePageZeroProtection";
 
-static NSString * const kMoreInfoURLKey = @"MoreInfoURL";
-static NSString * const kEventDetailURLKey = @"EventDetailURL";
-static NSString * const kEventDetailTextKey = @"EventDetailText";
-static NSString * const kUnknownBlockMessage = @"UnknownBlockMessage";
-static NSString * const kBannedBlockMessage = @"BannedBlockMessage";
+static NSString *const kMoreInfoURLKey = @"MoreInfoURL";
+static NSString *const kEventDetailURLKey = @"EventDetailURL";
+static NSString *const kEventDetailTextKey = @"EventDetailText";
+static NSString *const kUnknownBlockMessage = @"UnknownBlockMessage";
+static NSString *const kBannedBlockMessage = @"BannedBlockMessage";
 
-static NSString * const kSyncBaseURLKey = @"SyncBaseURL";
-static NSString * const kSyncLastSuccess = @"SyncLastSuccess";
-static NSString * const kSyncCleanRequired = @"SyncCleanRequired";
-static NSString * const kClientAuthCertificateFileKey = @"ClientAuthCertificateFile";
-static NSString * const kClientAuthCertificatePasswordKey = @"ClientAuthCertificatePassword";
-static NSString * const kClientAuthCertificateCNKey = @"ClientAuthCertificateCN";
-static NSString * const kClientAuthCertificateIssuerKey = @"ClientAuthCertificateIssuerCN";
-static NSString * const kServerAuthRootsDataKey = @"ServerAuthRootsData";
-static NSString * const kServerAuthRootsFileKey = @"ServerAuthRootsFile";
+static NSString *const kSyncBaseURLKey = @"SyncBaseURL";
+static NSString *const kSyncLastSuccess = @"SyncLastSuccess";
+static NSString *const kSyncCleanRequired = @"SyncCleanRequired";
+static NSString *const kClientAuthCertificateFileKey = @"ClientAuthCertificateFile";
+static NSString *const kClientAuthCertificatePasswordKey = @"ClientAuthCertificatePassword";
+static NSString *const kClientAuthCertificateCNKey = @"ClientAuthCertificateCN";
+static NSString *const kClientAuthCertificateIssuerKey = @"ClientAuthCertificateIssuerCN";
+static NSString *const kServerAuthRootsDataKey = @"ServerAuthRootsData";
+static NSString *const kServerAuthRootsFileKey = @"ServerAuthRootsFile";
 
-static NSString * const kMachineOwnerKey = @"MachineOwner";
-static NSString * const kMachineIDKey = @"MachineID";
+static NSString *const kMachineOwnerKey = @"MachineOwner";
+static NSString *const kMachineIDKey = @"MachineID";
 
-static NSString * const kMachineOwnerPlistFileKey = @"MachineOwnerPlist";
-static NSString * const kMachineOwnerPlistKeyKey = @"MachineOwnerKey";
+static NSString *const kMachineOwnerPlistFileKey = @"MachineOwnerPlist";
+static NSString *const kMachineOwnerPlistKeyKey = @"MachineOwnerKey";
 
-static NSString * const kMachineIDPlistFileKey = @"MachineIDPlist";
-static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
+static NSString *const kMachineIDPlistFileKey = @"MachineIDPlist";
+static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
 
 - (instancetype)initWithFilePath:(NSString *)filePath {
   self = [super init];
@@ -82,7 +82,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
   static SNTConfigurator *sharedConfigurator = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
-      sharedConfigurator = [[SNTConfigurator alloc] initWithFilePath:kDefaultConfigFilePath];
+    sharedConfigurator = [[SNTConfigurator alloc] initWithFilePath:kDefaultConfigFilePath];
   });
   return sharedConfigurator;
 }
@@ -202,7 +202,13 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 }
 
 - (NSURL *)syncBaseURL {
-  return [NSURL URLWithString:self.configData[kSyncBaseURLKey]];
+  NSString *urlStr = self.configData[kSyncBaseURLKey];
+  if (urlStr) {
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) LOGW(@"SyncBaseURL is not a valid URL!");
+    return url;
+  }
+  return nil;
 }
 
 - (NSString *)syncClientAuthCertificateFile {
@@ -298,9 +304,9 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
     return;
   }
 
-  NSDictionary *configData =
+  NSMutableDictionary *configData =
       [NSPropertyListSerialization propertyListWithData:readData
-                                                options:NSPropertyListImmutable
+                                                options:NSPropertyListMutableContainers
                                                  format:NULL
                                                   error:&error];
   if (error) {
@@ -308,28 +314,28 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
     return;
   }
 
-  if (!self.configData) {
-    self.configData = [configData mutableCopy];
-  } else if (self.syncBaseURL) {
+  if (self.syncBaseURL) {
     // Ensure no-one is trying to change protected keys behind our back.
-    NSMutableDictionary *configDataMutable = [configData mutableCopy];
     BOOL changed = NO;
-    for (NSString *key in self.protectedKeys) {
-      if (geteuid() == 0 &&
-          ((self.configData[key] && !configData[key]) ||
-           (!self.configData[key] && configData[key]) ||
-           (self.configData[key] && ![self.configData[key] isEqual:configData[key]]))) {
-        if (self.configData[key]) {
-          configDataMutable[key] = self.configData[key];
-        } else {
-          [configDataMutable removeObjectForKey:key];
+    if (geteuid() == 0) {
+      for (NSString *key in self.protectedKeys) {
+        if (((self.configData[key] && !configData[key]) ||
+             (!self.configData[key] && configData[key]) ||
+             (self.configData[key] && ![self.configData[key] isEqual:configData[key]]))) {
+          if (self.configData[key]) {
+            configData[key] = self.configData[key];
+          } else {
+            [configData removeObjectForKey:key];
+          }
+          changed = YES;
+          LOGI(@"Ignoring changed configuration key: %@", key);
         }
-        changed = YES;
-        LOGI(@"Ignoring changed configuration key: %@", key);
       }
     }
-    self.configData = configDataMutable;
+    self.configData = configData;
     if (changed) [self saveConfigToDisk];
+  } else {
+    self.configData = configData;
   }
 }
 
@@ -339,6 +345,7 @@ static NSString * const kMachineIDPlistKeyKey = @"MachineIDKey";
 ///  Saves the current @c self.configData to disk.
 ///
 - (void)saveConfigToDisk {
+  if (geteuid() != 0) return;
   [self.configData writeToFile:self.configFilePath atomically:YES];
 }
 

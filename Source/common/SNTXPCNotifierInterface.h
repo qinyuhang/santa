@@ -12,18 +12,14 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-/// Protocol implemented by SantaNotifier and utilized by santad
 @class SNTStoredEvent;
+
+/// Protocol implemented by SantaGUI and utilized by santad
 @protocol SNTNotifierXPC
 - (void)postBlockNotification:(SNTStoredEvent *)event withCustomMessage:(NSString *)message;
 @end
 
 @interface SNTXPCNotifierInterface : NSObject
-
-///
-///  @return the MachService ID for this service.
-///
-+ (NSString *)serviceId;
 
 ///
 ///  @return an initialized NSXPCInterface for the SNTNotifierXPC protocol.

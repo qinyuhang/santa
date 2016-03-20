@@ -16,52 +16,49 @@
 
 #import "MOLCodesignChecker.h"
 
-@protocol XPCConnectionValidityRequest
-- (void)isConnectionValidWithBlock:(void (^)(BOOL))block;
-@end
-
 @interface SNTXPCConnection ()
-
-///
-/// The XPC listener (used on server-side only).
-///
+/// The XPC listener (server only).
 @property NSXPCListener *listenerObject;
+/// Array of accepted connections (server only).
+@property NSMutableArray *acceptedConnections;
 
-///
-/// The current connection object.
-///
+/// The current connection object (client only).
 @property NSXPCConnection *currentConnection;
-
-///
-/// The remote interface to use while the connection hasn't been validated.
-///
-@property NSXPCInterface *validatorInterface;
-
 @end
 
 @implementation SNTXPCConnection
 
 #pragma mark Initializers
-- (instancetype)initServerWithName:(NSString *)name {
+
+- (instancetype)initServerWithListener:(NSXPCListener *)listener {
   self = [super init];
   if (self) {
-    Protocol *validatorProtocol = @protocol(XPCConnectionValidityRequest);
-    _validatorInterface = [NSXPCInterface interfaceWithProtocol:validatorProtocol];
-    _listenerObject = [[NSXPCListener alloc] initWithMachServiceName:name];
-
-    if (!_validatorInterface || !_listenerObject) return nil;
+    _listenerObject = listener;
+    if (!_listenerObject) return nil;
+    _acceptedConnections = [NSMutableArray array];
   }
   return self;
 }
 
-- (instancetype)initClientWithName:(NSString *)name options:(NSXPCConnectionOptions)options {
+- (instancetype)initServerWithName:(NSString *)name {
+  return [self initServerWithListener:[[NSXPCListener alloc] initWithMachServiceName:name]];
+}
+
+- (instancetype)initClientWithListener:(NSXPCListenerEndpoint *)listener {
   self = [super init];
   if (self) {
-    Protocol *validatorProtocol = @protocol(XPCConnectionValidityRequest);
-    _validatorInterface = [NSXPCInterface interfaceWithProtocol:validatorProtocol];
-    _currentConnection = [[NSXPCConnection alloc] initWithMachServiceName:name options:options];
+    _currentConnection = [[NSXPCConnection alloc] initWithListenerEndpoint:listener];
+    if (!_currentConnection) return nil;
+  }
+  return self;
+}
 
-    if (!_validatorInterface || !_currentConnection) return nil;
+- (instancetype)initClientWithName:(NSString *)name privileged:(BOOL)privileged {
+  self = [super init];
+  if (self) {
+    NSXPCConnectionOptions options = (privileged ? NSXPCConnectionPrivileged : 0);
+    _currentConnection = [[NSXPCConnection alloc] initWithMachServiceName:name options:options];
+    if (!_currentConnection) return nil;
   }
   return self;
 }
@@ -75,136 +72,45 @@
 
 - (void)resume {
   if (self.listenerObject) {
-    // A new listener doesn't do anything until a client connects.
     self.listenerObject.delegate = self;
     [self.listenerObject resume];
   } else {
-    // A new client begins the validation process.
-    NSXPCConnection *connection = self.currentConnection;
-
-    connection.remoteObjectInterface = self.validatorInterface;
-
-    connection.invalidationHandler = ^{
-        [self invokeInvalidationHandler];
-        self.currentConnection = nil;
-    };
-
-    connection.interruptionHandler = ^{ [self.currentConnection invalidate]; };
-
-    [connection resume];
-
-    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-    [[connection remoteObjectProxy] isConnectionValidWithBlock:^void(BOOL response) {
-        pid_t pid = self.currentConnection.processIdentifier;
-
-        MOLCodesignChecker *selfCS = [[MOLCodesignChecker alloc] initWithSelf];
-        MOLCodesignChecker *otherCS = [[MOLCodesignChecker alloc] initWithPID:pid];
-
-        if (response && [otherCS signingInformationMatches:selfCS]) {
-          [self.currentConnection suspend];
-          self.currentConnection.remoteObjectInterface = self.remoteInterface;
-          self.currentConnection.exportedInterface = self.exportedInterface;
-          self.currentConnection.exportedObject = self.exportedObject;
-          [self invokeAcceptedHandler];
-          [self.currentConnection resume];
-          dispatch_semaphore_signal(sema);
-        } else {
-          [self invokeRejectedHandler];
-          [self.currentConnection invalidate];
-          self.currentConnection = nil;
-          dispatch_semaphore_signal(sema);
-        }
-    }];
-
-    // Wait for validation to complete, at most 5s
-    if (dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
-      [self invalidate];
-    }
+    self.currentConnection.remoteObjectInterface = self.remoteInterface;
+    self.currentConnection.interruptionHandler = self.invalidationHandler;
+    self.currentConnection.invalidationHandler = self.invalidationHandler;
+    [self.currentConnection resume];
   }
 }
 
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection {
-  // Reject connection if a connection already exists. As the invalidation/interruption handlers
-  // both cause the currentConnection to be nil'd out, this should be OK.
-  if (self.currentConnection) return NO;
+  pid_t pid = connection.processIdentifier;
+  MOLCodesignChecker *otherCS = [[MOLCodesignChecker alloc] initWithPID:pid];
+  if (![otherCS signingInformationMatches:[[MOLCodesignChecker alloc] initWithSelf]]) {
+    return NO;
+  }
 
-  connection.exportedObject = self;
-  connection.exportedInterface = self.validatorInterface;
+  [self.acceptedConnections addObject:connection];
 
-  connection.invalidationHandler = ^{
-      [self invokeInvalidationHandler];
-      self.currentConnection = nil;
+  __weak __typeof(connection) weakConnection = connection;
+  connection.interruptionHandler = connection.invalidationHandler = ^{
+    [self.acceptedConnections removeObject:weakConnection];
+    if (self.invalidationHandler) self.invalidationHandler();
   };
 
-  connection.interruptionHandler = ^{
-      // Invalidate the connection, causing the handler above to run
-      [self.currentConnection invalidate];
-  };
-
-  // At this point the client is connected and can send messages but the only message it can send
-  // is isConnectionValidWithBlock: and we won't send anything to it until it has.
-  self.currentConnection = connection;
+  connection.exportedInterface = self.exportedInterface;
+  connection.exportedObject = self.exportedObject;
 
   [connection resume];
-
   return YES;
 }
 
-- (void)isConnectionValidWithBlock:(void (^)(BOOL))block {
-  pid_t pid = self.currentConnection.processIdentifier;
-
-  MOLCodesignChecker *selfCS = [[MOLCodesignChecker alloc] initWithSelf];
-  MOLCodesignChecker *otherCS = [[MOLCodesignChecker alloc] initWithPID:pid];
-
-  if ([otherCS signingInformationMatches:selfCS]) {
-    [self.currentConnection suspend];
-    self.currentConnection.remoteObjectInterface = self.remoteInterface;
-    self.currentConnection.exportedInterface = self.exportedInterface;
-    self.currentConnection.exportedObject = self.exportedObject;
-    [self.currentConnection resume];
-
-    [self invokeAcceptedHandler];
-
-    // Let remote end know that we accepted. In acception this must come last otherwise
-    // the remote end might start sending messages before the interface is fully set-up.
-    block(YES);
-  } else {
-    // Let remote end know that we rejected. In rejection this must come first otherwise
-    // the connection is invalidated before the client ever realizes.
-    block(NO);
-
-    [self invokeRejectedHandler];
-
-    [self.currentConnection invalidate];
-    self.currentConnection = nil;
-  }
-}
-
 - (id)remoteObjectProxy {
-  if (self.currentConnection && self.currentConnection.remoteObjectInterface) {
+  if (self.currentConnection.remoteObjectInterface) {
     return [self.currentConnection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-        [self.currentConnection invalidate];
+      [self.currentConnection invalidate];
     }];
   }
   return nil;
-}
-
-- (void)invokeAcceptedHandler {
-  if (self.acceptedHandler) {
-    self.acceptedHandler();
-  }
-}
-
-- (void)invokeRejectedHandler {
-  if (self.rejectedHandler) {
-    self.rejectedHandler();
-  }
-}
-
-- (void)invokeInvalidationHandler {
-  if (self.invalidationHandler) {
-    self.invalidationHandler();
-  }
 }
 
 #pragma mark Connection tear-down
@@ -213,6 +119,11 @@
   if (self.currentConnection) {
     [self.currentConnection invalidate];
     self.currentConnection = nil;
+  } else if (self.acceptedConnections.count) {
+    for (NSXPCConnection *conn in self.acceptedConnections) {
+      [conn invalidate];
+    }
+    [self.acceptedConnections removeAllObjects];
   }
 }
 

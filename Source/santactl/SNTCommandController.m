@@ -66,19 +66,11 @@ static NSMutableDictionary *registeredCommands;
 }
 
 + (SNTXPCConnection *)connectToDaemon {
-  SNTXPCConnection *daemonConn =
-      [[SNTXPCConnection alloc] initClientWithName:[SNTXPCControlInterface serviceId]
-                                           options:NSXPCConnectionPrivileged];
-  daemonConn.remoteInterface = [SNTXPCControlInterface controlInterface];
-
-  daemonConn.rejectedHandler = ^{
-      printf("The daemon rejected the connection\n");
-      exit(1);
-  };
+  SNTXPCConnection *daemonConn = [SNTXPCControlInterface configuredConnection];
 
   daemonConn.invalidationHandler = ^{
-      printf("An error occurred communicating with the daemon, is it running?\n");
-      exit(1);
+    printf("An error occurred communicating with the daemon, is it running?\n");
+    exit(1);
   };
 
   [daemonConn resume];

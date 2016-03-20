@@ -22,7 +22,7 @@
 #define DECODE(cls, key) [decoder decodeObjectOfClass:[cls class] forKey:key]
 #define DECODEARRAY(cls, key) \
     [decoder decodeObjectOfClasses:[NSSet setWithObjects:[NSArray class], [cls class], nil] \
-                                                  forKey:key]
+                            forKey:key]
 
 + (BOOL)supportsSecureCoding {
   return YES;
@@ -52,8 +52,8 @@
 
   ENCODE(self.quarantineDataURL, @"quarantineDataURL");
   ENCODE(self.quarantineRefererURL, @"quarantineRefererURL");
-  ENCODE(self.quarantineTimestamp, @"quarantineTiemstamp");
-  ENCODE(self.quarantineAgentBundleID, @"quarantineAgentBundleID");  
+  ENCODE(self.quarantineTimestamp, @"quarantineTimestamp");
+  ENCODE(self.quarantineAgentBundleID, @"quarantineAgentBundleID");
 }
 
 - (instancetype)initWithCoder:(NSCoder *)decoder {

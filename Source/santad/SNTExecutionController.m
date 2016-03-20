@@ -20,9 +20,9 @@
 
 #include "SNTLogging.h"
 
-#import "SNTCachedDecision.h"
 #import "MOLCertificate.h"
 #import "MOLCodesignChecker.h"
+#import "SNTCachedDecision.h"
 #import "SNTCommonEnums.h"
 #import "SNTConfigurator.h"
 #import "SNTDriverManager.h"
@@ -30,11 +30,10 @@
 #import "SNTEventLog.h"
 #import "SNTEventTable.h"
 #import "SNTFileInfo.h"
+#import "SNTNotificationQueue.h"
 #import "SNTRule.h"
 #import "SNTRuleTable.h"
 #import "SNTStoredEvent.h"
-#import "SNTXPCConnection.h"
-#import "SNTXPCNotifierInterface.h"
 
 @implementation SNTExecutionController
 
@@ -43,14 +42,14 @@
 - (instancetype)initWithDriverManager:(SNTDriverManager *)driverManager
                             ruleTable:(SNTRuleTable *)ruleTable
                            eventTable:(SNTEventTable *)eventTable
-                   notifierConnection:(SNTXPCConnection *)notifier
+                        notifierQueue:(SNTNotificationQueue *)notifierQueue
                              eventLog:(SNTEventLog *)eventLog {
   self = [super init];
   if (self) {
     _driverManager = driverManager;
     _ruleTable = ruleTable;
     _eventTable = eventTable;
-    _notifierConnection = notifier;
+    _notifierQueue = notifierQueue;
     _eventLog = eventLog;
 
     // This establishes the XPC connection between libsecurity and syspolicyd.
@@ -116,7 +115,7 @@
   SNTFileInfo *binInfo = [[SNTFileInfo alloc] initWithPath:@(message.path) error:&fileInfoError];
   if (!binInfo) {
     LOGW(@"Failed to read file %@: %@", binInfo.path, fileInfoError.localizedDescription);
-    [self.driverManager postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW
+    [self.driverManager postToKernelAction:ACTION_RESPOND_ALLOW
                                 forVnodeID:message.vnode_id];
     return;
   }
@@ -130,11 +129,12 @@
   cd.certCommonName = csInfo.leafCertificate.commonName;
   cd.certSHA256 = csInfo.leafCertificate.SHA256;
   cd.vnodeId = message.vnode_id;
+  cd.quarantineURL = binInfo.quarantineDataURL;
   cd.decision = [self makeDecision:cd binaryInfo:binInfo];
 
   // Save decision details for logging the execution later.
   santa_action_t action = [self actionForEventState:cd.decision];
-  if (action == ACTION_RESPOND_CHECKBW_ALLOW) [self.eventLog saveDecisionDetails:cd];
+  if (action == ACTION_RESPOND_ALLOW) [self.eventLog saveDecisionDetails:cd];
 
   // Send the decision to the kernel.
   [self.driverManager postToKernelAction:action forVnodeID:cd.vnodeId];
@@ -143,7 +143,6 @@
   if (cd.decision != EVENTSTATE_ALLOW_BINARY &&
       cd.decision != EVENTSTATE_ALLOW_CERTIFICATE &&
       cd.decision != EVENTSTATE_ALLOW_SCOPE) {
-
     SNTStoredEvent *se = [[SNTStoredEvent alloc] init];
     se.occurrenceDate = [[NSDate alloc] init];
     se.fileSHA256 = cd.sha256;
@@ -179,12 +178,12 @@
     se.quarantineDataURL = binInfo.quarantineDataURL;
     se.quarantineRefererURL = binInfo.quarantineRefererURL;
     se.quarantineTimestamp = binInfo.quarantineTimestamp;
-    se.quarantineAgentBundleID = binInfo.quarantineAgentBundleID;    
+    se.quarantineAgentBundleID = binInfo.quarantineAgentBundleID;
 
     [self.eventTable addStoredEvent:se];
 
     // If binary was blocked, do the needful
-    if (action != ACTION_RESPOND_CHECKBW_ALLOW) {
+    if (action != ACTION_RESPOND_ALLOW) {
       [self.eventLog logDeniedExecution:cd withMessage:message];
 
       // So the server has something to show the user straight away, initiate an event
@@ -192,8 +191,7 @@
       [self initiateEventUploadForEvent:se];
 
       if (!cd.silentBlock) {
-        [[self.notifierConnection remoteObjectProxy] postBlockNotification:se
-                                                         withCustomMessage:cd.customMsg];
+        [self.notifierQueue addEvent:se customMessage:cd.customMsg];
       }
     }
   }
@@ -263,15 +261,15 @@
     case EVENTSTATE_ALLOW_CERTIFICATE:
     case EVENTSTATE_ALLOW_SCOPE:
     case EVENTSTATE_ALLOW_UNKNOWN:
-      return ACTION_RESPOND_CHECKBW_ALLOW;
+      return ACTION_RESPOND_ALLOW;
     case EVENTSTATE_BLOCK_BINARY:
     case EVENTSTATE_BLOCK_CERTIFICATE:
     case EVENTSTATE_BLOCK_SCOPE:
     case EVENTSTATE_BLOCK_UNKNOWN:
-      return ACTION_RESPOND_CHECKBW_DENY;
+      return ACTION_RESPOND_DENY;
     default:
       LOGW(@"Invalid event state %d", state);
-      return ACTION_RESPOND_CHECKBW_DENY;
+      return ACTION_RESPOND_DENY;
   }
 }
 

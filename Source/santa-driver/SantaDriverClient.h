@@ -17,12 +17,12 @@
 
 #include <IOKit/IOUserClient.h>
 #include <sys/kauth.h>
-#include <sys/vnode.h>
 #include <sys/proc.h>
+#include <sys/vnode.h>
 
+#include "SNTKernelCommon.h"
 #include "SantaDecisionManager.h"
 #include "SantaDriver.h"
-#include "SNTKernelCommon.h"
 
 ///
 ///  This class is instantiated by IOKit when a new client process attempts to
@@ -76,7 +76,7 @@ class com_google_SantaDriverClient : public IOUserClient {
   ///  which just calls the method on the provided target.
   ///
 
-  ///  Called during client connection
+  ///  Called during client connection.
   IOReturn open();
   static IOReturn static_open(
       com_google_SantaDriverClient *target,

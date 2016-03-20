@@ -1,4 +1,4 @@
-/// Copyright 2015 Google Inc. All rights reserved.
+/// Copyright 2016 Google Inc. All rights reserved.
 ///
 /// Licensed under the Apache License, Version 2.0 (the "License");
 /// you may not use this file except in compliance with the License.
@@ -12,14 +12,13 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-///
-///  The main controller class for santad
-///
-@interface SNTApplication : NSObject
+@class SNTStoredEvent;
+@class SNTXPCConnection;
 
-///
-///  Begins fielding requests from the driver
-///
-- (void)start;
+@interface SNTNotificationQueue : NSObject
+
+@property(nonatomic) SNTXPCConnection *notifierConnection;
+
+- (void)addEvent:(SNTStoredEvent *)event customMessage:(NSString *)message;
 
 @end

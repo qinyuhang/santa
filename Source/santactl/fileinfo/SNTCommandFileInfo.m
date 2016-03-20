@@ -62,9 +62,14 @@ REGISTER_COMMAND_NAME(@"fileinfo")
   NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
   dateFormatter.dateFormat = @"yyyy/MM/dd HH:mm:ss Z";
 
+  if (isatty(STDOUT_FILENO)) printf("Hashing...");
+  NSString *sha1, *sha256;
+  [fileInfo hashSHA1:&sha1 SHA256:&sha256];
+  if (isatty(STDOUT_FILENO)) printf("\r");
+
   [self printKey:@"Path" value:fileInfo.path];
-  [self printKey:@"SHA-256" value:fileInfo.SHA256];
-  [self printKey:@"SHA-1" value:fileInfo.SHA1];
+  [self printKey:@"SHA-256" value:sha256];
+  [self printKey:@"SHA-1" value:sha1];
 
   if (fileInfo.bundlePath) {
     [self printKey:@"Bundle Name" value:fileInfo.bundleName];
@@ -87,31 +92,69 @@ REGISTER_COMMAND_NAME(@"fileinfo")
   }
 
   NSString *s = [NSString stringWithFormat:@"%@ (%@)",
-                    [self humanReadableFileType:fileInfo], [archs componentsJoinedByString:@", "]];
+                                           [self humanReadableFileType:fileInfo],
+                                           [archs componentsJoinedByString:@", "]];
   [self printKey:@"Type" value:s];
 
   if ([fileInfo isMissingPageZero]) {
     [self printKey:@"Page Zero" value:@"__PAGEZERO segment missing/bad!"];
   }
 
-  MOLCodesignChecker *csc = [[MOLCodesignChecker alloc] initWithBinaryPath:filePath];
-  [self printKey:@"Code-signed" value:(csc) ? @"Yes" : @"No"];
-  if (csc) {
+  NSError *error;
+  MOLCodesignChecker *csc = [[MOLCodesignChecker alloc] initWithBinaryPath:filePath error:&error];
+  if (!error) {
+    [self printKey:@"Code-signed" value:@"Yes"];
+  } else {
+    switch (error.code) {
+      case errSecCSUnsigned:
+        [self printKey:@"Code-signed" value:@"No"];
+        break;
+      case errSecCSSignatureFailed:
+      case errSecCSStaticCodeChanged:
+      case errSecCSSignatureNotVerifiable:
+      case errSecCSSignatureUnsupported:
+        [self printKey:@"Code-signed" value:@"Yes, but code/signatured changed/unverifiable"];
+        break;
+      case errSecCSResourceDirectoryFailed:
+      case errSecCSResourceNotSupported:
+      case errSecCSResourceRulesInvalid:
+      case errSecCSResourcesInvalid:
+      case errSecCSResourcesNotFound:
+      case errSecCSResourcesNotSealed:
+        [self printKey:@"Code-signed" value:@"Yes, but resources invalid"];
+        break;
+      case errSecCSReqFailed:
+      case errSecCSReqInvalid:
+      case errSecCSReqUnsupported:
+        [self printKey:@"Code-signed" value:@"Yes, but failed requirement validation"];
+        break;
+      case errSecCSInfoPlistFailed:
+        [self printKey:@"Code-signed" value:@"Yes, but can't validate as Info.plist is missing"];
+        break;
+      default: {
+        NSString *val = [NSString stringWithFormat:@"Yes, but failed to validate (%ld)",
+                                                   error.code];
+        [self printKey:@"Code-signed" value:val];
+        break;
+      }
+    }
+  }
+  if (csc.certificates) {
     printf("Signing chain:\n");
 
     [csc.certificates enumerateObjectsUsingBlock:^(MOLCertificate *c,
                                                    unsigned long idx,
                                                    BOOL *stop) {
-        printf("    %2lu. %-20s: %s\n", idx + 1, "SHA-256", [c.SHA256 UTF8String]);
-        printf("        %-20s: %s\n", "SHA-1", [c.SHA1 UTF8String]);
-        printf("        %-20s: %s\n", "Common Name", [c.commonName UTF8String]);
-        printf("        %-20s: %s\n", "Organization", [c.orgName UTF8String]);
-        printf("        %-20s: %s\n", "Organizational Unit", [c.orgUnit UTF8String]);
-        printf("        %-20s: %s\n", "Valid From",
-               [[dateFormatter stringFromDate:c.validFrom] UTF8String]);
-        printf("        %-20s: %s\n", "Valid Until",
-               [[dateFormatter stringFromDate:c.validUntil] UTF8String]);
-        printf("\n");
+      printf("    %2lu. %-20s: %s\n", idx + 1, "SHA-256", [c.SHA256 UTF8String]);
+      printf("        %-20s: %s\n", "SHA-1", [c.SHA1 UTF8String]);
+      printf("        %-20s: %s\n", "Common Name", [c.commonName UTF8String]);
+      printf("        %-20s: %s\n", "Organization", [c.orgName UTF8String]);
+      printf("        %-20s: %s\n", "Organizational Unit", [c.orgUnit UTF8String]);
+      printf("        %-20s: %s\n", "Valid From",
+             [[dateFormatter stringFromDate:c.validFrom] UTF8String]);
+      printf("        %-20s: %s\n", "Valid Until",
+             [[dateFormatter stringFromDate:c.validUntil] UTF8String]);
+      printf("\n");
     }];
   }
 
@@ -119,16 +162,18 @@ REGISTER_COMMAND_NAME(@"fileinfo")
 }
 
 + (void)printKey:(NSString *)key value:(NSString *)value {
+  if (!key || !value) return;
   printf("%-21s: %s\n", [key UTF8String], [value UTF8String]);
 }
 
 + (NSString *)humanReadableFileType:(SNTFileInfo *)fi {
-  if ([fi isScript])     return @"Script";
+  if ([fi isScript]) return @"Script";
   if ([fi isXARArchive]) return @"XAR Archive";
-  if ([fi isDylib])      return @"Dynamic Library";
-  if ([fi isKext])       return @"Kernel Extension";
-  if ([fi isFat])        return @"Fat Binary";
-  if ([fi isMachO])      return @"Thin Binary";
+  if ([fi isDylib]) return @"Dynamic Library";
+  if ([fi isKext]) return @"Kernel Extension";
+  if ([fi isFat]) return @"Fat Binary";
+  if ([fi isMachO]) return @"Thin Binary";
+  if ([fi isDMG]) return @"Disk Image";
   return @"Unknown";
 }
 

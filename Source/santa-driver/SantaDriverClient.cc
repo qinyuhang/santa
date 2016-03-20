@@ -25,7 +25,7 @@ OSDefineMetaClassAndStructors(com_google_SantaDriverClient, IOUserClient);
 bool SantaDriverClient::initWithTask(
     task_t owningTask, void *securityID, UInt32 type) {
   if (clientHasPrivilege(
-      owningTask, kIOClientPrivilegeAdministrator) != KERN_SUCCESS) {
+          owningTask, kIOClientPrivilegeAdministrator) != KERN_SUCCESS) {
     LOGW("Unprivileged client attempted to connect.");
     return false;
   }
@@ -73,18 +73,36 @@ IOReturn SantaDriverClient::registerNotificationPort(
     mach_port_t port, UInt32 type, UInt32 ref) {
   if (port == MACH_PORT_NULL) return kIOReturnError;
 
-  decisionManager->ConnectClient(port, proc_selfpid());
-  LOGI("Client connected, PID: %d.", proc_selfpid());
+  switch (type) {
+    case QUEUETYPE_DECISION:
+      decisionManager->SetDecisionPort(port);
+      break;
+    case QUEUETYPE_LOG:
+      decisionManager->SetLogPort(port);
+      break;
+    default:
+      return kIOReturnBadArgument;
+  }
 
   return kIOReturnSuccess;
 }
 
 IOReturn SantaDriverClient::clientMemoryForType(
     UInt32 type, IOOptionBits *options, IOMemoryDescriptor **memory) {
-  if (type != kIODefaultMemoryType) return kIOReturnNoMemory;
+  switch (type) {
+    case QUEUETYPE_DECISION:
+      *options = 0;
+      *memory = decisionManager->GetDecisionMemoryDescriptor();
+      decisionManager->ConnectClient(proc_selfpid());
+      break;
+    case QUEUETYPE_LOG:
+      *options = 0;
+      *memory = decisionManager->GetLogMemoryDescriptor();
+      break;
+    default:
+      return kIOReturnBadArgument;
+  }
 
-  *options = 0;
-  *memory = decisionManager->GetMemoryDescriptor();
   (*memory)->retain();
 
   return kIOReturnSuccess;
@@ -114,7 +132,7 @@ IOReturn SantaDriverClient::static_open(
 IOReturn SantaDriverClient::allow_binary(const uint64_t vnode_id) {
   char vnode_id_str[21];
   snprintf(vnode_id_str, sizeof(vnode_id_str), "%llu", vnode_id);
-  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_CHECKBW_ALLOW);
+  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_ALLOW);
 
   return kIOReturnSuccess;
 }
@@ -133,7 +151,7 @@ IOReturn SantaDriverClient::static_allow_binary(
 IOReturn SantaDriverClient::deny_binary(const uint64_t vnode_id) {
   char vnode_id_str[21];
   snprintf(vnode_id_str, sizeof(vnode_id_str), "%llu", vnode_id);
-  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_CHECKBW_DENY);
+  decisionManager->AddToCache(vnode_id_str, ACTION_RESPOND_DENY);
 
   return kIOReturnSuccess;
 }

@@ -27,16 +27,21 @@ bool SantaDecisionManager::init() {
 
   sdm_lock_attr_ = lck_attr_alloc_init();
 
-  dataqueue_lock_ = lck_mtx_alloc_init(sdm_lock_grp_, sdm_lock_attr_);
+  decision_dataqueue_lock_ = lck_mtx_alloc_init(sdm_lock_grp_, sdm_lock_attr_);
+  log_dataqueue_lock_ = lck_mtx_alloc_init(sdm_lock_grp_, sdm_lock_attr_);
   cached_decisions_lock_ = lck_rw_alloc_init(sdm_lock_grp_, sdm_lock_attr_);
   vnode_pid_map_lock_ = lck_rw_alloc_init(sdm_lock_grp_, sdm_lock_attr_);
 
   cached_decisions_ = OSDictionary::withCapacity(1000);
   vnode_pid_map_ = OSDictionary::withCapacity(1000);
 
-  dataqueue_ = IOSharedDataQueue::withEntries(kMaxQueueEvents,
-                                              sizeof(santa_message_t));
-  if (!dataqueue_) return kIOReturnNoMemory;
+  decision_dataqueue_ = IOSharedDataQueue::withEntries(kMaxDecisionQueueEvents,
+                                                       sizeof(santa_message_t));
+  if (!decision_dataqueue_) return kIOReturnNoMemory;
+
+  log_dataqueue_ = IOSharedDataQueue::withEntries(kMaxLogQueueEvents,
+                                                  sizeof(santa_message_t));
+  if (!log_dataqueue_) return kIOReturnNoMemory;
 
   client_pid_ = 0;
 
@@ -54,9 +59,14 @@ void SantaDecisionManager::free() {
     vnode_pid_map_lock_ = nullptr;
   }
 
-  if (dataqueue_lock_) {
-    lck_mtx_free(dataqueue_lock_, sdm_lock_grp_);
-    dataqueue_lock_ = nullptr;
+  if (decision_dataqueue_lock_) {
+    lck_mtx_free(decision_dataqueue_lock_, sdm_lock_grp_);
+    decision_dataqueue_lock_ = nullptr;
+  }
+
+  if (log_dataqueue_lock_) {
+    lck_mtx_free(log_dataqueue_lock_, sdm_lock_grp_);
+    log_dataqueue_lock_ = nullptr;
   }
 
   if (sdm_lock_attr_) {
@@ -74,7 +84,8 @@ void SantaDecisionManager::free() {
     sdm_lock_grp_attr_ = nullptr;
   }
 
-  OSSafeReleaseNULL(dataqueue_);
+  OSSafeReleaseNULL(decision_dataqueue_);
+  OSSafeReleaseNULL(log_dataqueue_);
   OSSafeReleaseNULL(cached_decisions_);
   OSSafeReleaseNULL(vnode_pid_map_);
 
@@ -83,20 +94,17 @@ void SantaDecisionManager::free() {
 
 #pragma mark Client Management
 
-void SantaDecisionManager::ConnectClient(mach_port_t port, pid_t pid) {
+void SantaDecisionManager::ConnectClient(pid_t pid) {
   if (!pid) return;
 
   // Any decisions made while the daemon wasn't
   // connected should be cleared
   ClearCache();
 
-  lck_mtx_lock(dataqueue_lock_);
-  dataqueue_->setNotificationPort(port);
-  lck_mtx_unlock(dataqueue_lock_);
-
   client_pid_ = pid;
 
-  failed_queue_requests_ = 0;
+  failed_decision_queue_requests_ = 0;
+  failed_log_queue_requests_ = 0;
 }
 
 void SantaDecisionManager::DisconnectClient(bool itDied) {
@@ -107,22 +115,27 @@ void SantaDecisionManager::DisconnectClient(bool itDied) {
   if (!itDied) {
     santa_message_t *message = new santa_message_t;
     message->action = ACTION_REQUEST_SHUTDOWN;
-    PostToQueue(message);
+    PostToDecisionQueue(message);
     delete message;
-    dataqueue_->setNotificationPort(nullptr);
+    decision_dataqueue_->setNotificationPort(nullptr);
   } else {
-    // If the client died, reset the data queue so when it reconnects
+    // If the client died, reset the data queues so when it reconnects
     // it doesn't get swamped straight away.
-    lck_mtx_lock(dataqueue_lock_);
-    dataqueue_->release();
-    dataqueue_ = IOSharedDataQueue::withEntries(kMaxQueueEvents,
-                                                sizeof(santa_message_t));
-    lck_mtx_unlock(dataqueue_lock_);
-  }
+    lck_mtx_lock(decision_dataqueue_lock_);
+    decision_dataqueue_->release();
+    decision_dataqueue_ = IOSharedDataQueue::withEntries(
+        kMaxDecisionQueueEvents, sizeof(santa_message_t));
+    lck_mtx_unlock(decision_dataqueue_lock_);
 
+    lck_mtx_lock(log_dataqueue_lock_);
+    log_dataqueue_->release();
+    log_dataqueue_ = IOSharedDataQueue::withEntries(
+        kMaxLogQueueEvents, sizeof(santa_message_t));
+    lck_mtx_unlock(log_dataqueue_lock_);
+  }
 }
 
-bool SantaDecisionManager::ClientConnected() {
+bool SantaDecisionManager::ClientConnected() const {
   proc_t p = proc_find(client_pid_);
   bool is_exiting = false;
   if (p) {
@@ -132,8 +145,24 @@ bool SantaDecisionManager::ClientConnected() {
   return (client_pid_ > 0 && !is_exiting);
 }
 
-IOMemoryDescriptor *SantaDecisionManager::GetMemoryDescriptor() {
-  return dataqueue_->getMemoryDescriptor();
+void SantaDecisionManager::SetDecisionPort(mach_port_t port) {
+  lck_mtx_lock(decision_dataqueue_lock_);
+  decision_dataqueue_->setNotificationPort(port);
+  lck_mtx_unlock(decision_dataqueue_lock_);
+}
+
+void SantaDecisionManager::SetLogPort(mach_port_t port) {
+  lck_mtx_lock(log_dataqueue_lock_);
+  log_dataqueue_->setNotificationPort(port);
+  lck_mtx_unlock(log_dataqueue_lock_);
+}
+
+IOMemoryDescriptor *SantaDecisionManager::GetDecisionMemoryDescriptor() const {
+  return decision_dataqueue_->getMemoryDescriptor();
+}
+
+IOMemoryDescriptor *SantaDecisionManager::GetLogMemoryDescriptor() const {
+  return log_dataqueue_->getMemoryDescriptor();
 }
 
 #pragma mark Listener Control
@@ -188,9 +217,9 @@ void SantaDecisionManager::AddToCache(
     ClearCache();
   }
 
-  if (decision == ACTION_REQUEST_CHECKBW) {
+  if (decision == ACTION_REQUEST_BINARY) {
     SantaCachedDecision *pending = new SantaCachedDecision();
-    pending->setAction(ACTION_REQUEST_CHECKBW, 0);
+    pending->setAction(ACTION_REQUEST_BINARY, 0);
     lck_rw_lock_exclusive(cached_decisions_lock_);
     cached_decisions_->setObject(identifier, pending);
     lck_rw_unlock_exclusive(cached_decisions_lock_);
@@ -223,7 +252,7 @@ void SantaDecisionManager::CacheCheck(const char *identifier) {
   }
 }
 
-uint64_t SantaDecisionManager::CacheCount() {
+uint64_t SantaDecisionManager::CacheCount() const {
   return cached_decisions_->getCount();
 }
 
@@ -248,16 +277,16 @@ santa_action_t SantaDecisionManager::GetFromCache(const char *identifier) {
   }
   lck_rw_unlock_shared(cached_decisions_lock_);
 
-  if (CHECKBW_RESPONSE_VALID(result)) {
+  if (RESPONSE_VALID(result)) {
     uint64_t diff_time = GetCurrentUptime();
 
-    if (result == ACTION_RESPOND_CHECKBW_ALLOW) {
+    if (result == ACTION_RESPOND_ALLOW) {
       if ((kMaxAllowCacheTimeMilliseconds * 1000) > diff_time) {
         diff_time = 0;
       } else {
         diff_time -= (kMaxAllowCacheTimeMilliseconds * 1000);
       }
-    } else if (result == ACTION_RESPOND_CHECKBW_DENY) {
+    } else if (result == ACTION_RESPOND_DENY) {
       if ((kMaxDenyCacheTimeMilliseconds * 1000) > diff_time) {
         diff_time = 0;
       } else {
@@ -283,14 +312,14 @@ santa_action_t SantaDecisionManager::GetFromDaemon(
   // Wait for the daemon to respond or die.
   do {
     // Add pending request to cache.
-    AddToCache(vnode_id_str, ACTION_REQUEST_CHECKBW, 0);
+    AddToCache(vnode_id_str, ACTION_REQUEST_BINARY, 0);
 
     // Send request to daemon...
-    if (!PostToQueue(message)) {
-      OSIncrementAtomic(&failed_queue_requests_);
-      if (failed_queue_requests_ > kMaxQueueFailures) {
+    if (!PostToDecisionQueue(message)) {
+      OSIncrementAtomic(&failed_decision_queue_requests_);
+      if (failed_decision_queue_requests_ > kMaxDecisionQueueFailures) {
         LOGE("Failed to queue more than %d requests, killing daemon",
-             kMaxQueueFailures);
+             kMaxDecisionQueueFailures);
         proc_signal(client_pid_, SIGKILL);
         client_pid_ = 0;
       }
@@ -302,11 +331,11 @@ santa_action_t SantaDecisionManager::GetFromDaemon(
     do {
       IOSleep(kRequestLoopSleepMilliseconds);
       return_action = GetFromCache(vnode_id_str);
-    } while (return_action == ACTION_REQUEST_CHECKBW && ClientConnected());
-  } while (!CHECKBW_RESPONSE_VALID(return_action) && ClientConnected());
+    } while (return_action == ACTION_REQUEST_BINARY && ClientConnected());
+  } while (!RESPONSE_VALID(return_action) && ClientConnected());
 
   // If response is still not valid, the daemon exited
-  if (!CHECKBW_RESPONSE_VALID(return_action)) {
+  if (!RESPONSE_VALID(return_action)) {
     LOGE("Daemon process did not respond correctly. Allowing executions "
          "until it comes back. Executable path: %s", message->path);
     CacheCheck(vnode_id_str);
@@ -322,13 +351,13 @@ santa_action_t SantaDecisionManager::FetchDecision(
     const uint64_t vnode_id,
     const char *vnode_id_str) {
   santa_action_t return_action = ACTION_UNSET;
-  if (!ClientConnected()) return ACTION_RESPOND_CHECKBW_ALLOW;
+  if (!ClientConnected()) return ACTION_RESPOND_ALLOW;
 
   // Check to see if item is in cache
   return_action = GetFromCache(vnode_id_str);
 
   // If item was in cache return it.
-  if CHECKBW_RESPONSE_VALID(return_action) return return_action;
+  if (RESPONSE_VALID(return_action)) return return_action;
 
   // Get path
   char path[MAXPATHLEN];
@@ -339,7 +368,7 @@ santa_action_t SantaDecisionManager::FetchDecision(
 
   santa_message_t *message = NewMessage();
   strlcpy(message->path, path, sizeof(message->path));
-  message->action = ACTION_REQUEST_CHECKBW;
+  message->action = ACTION_REQUEST_BINARY;
   message->vnode_id = vnode_id;
   proc_name(message->ppid, message->pname, sizeof(message->pname));
   santa_action_t ret = GetFromDaemon(message, vnode_id_str);
@@ -349,7 +378,7 @@ santa_action_t SantaDecisionManager::FetchDecision(
 
 #pragma mark Misc
 
-santa_message_t* SantaDecisionManager::NewMessage() {
+santa_message_t *SantaDecisionManager::NewMessage() const {
   santa_message_t *message = new santa_message_t;
   message->uid = kauth_getuid();
   message->gid = kauth_getgid();
@@ -358,27 +387,41 @@ santa_message_t* SantaDecisionManager::NewMessage() {
   return message;
 }
 
-bool SantaDecisionManager::PostToQueue(santa_message_t *message) {
+bool SantaDecisionManager::PostToDecisionQueue(santa_message_t *message) {
   bool kr = false;
-  lck_mtx_lock(dataqueue_lock_);
-  kr = dataqueue_->enqueue(message, sizeof(santa_message_t));
+  lck_mtx_lock(decision_dataqueue_lock_);
+  kr = decision_dataqueue_->enqueue(message, sizeof(santa_message_t));
+  lck_mtx_unlock(decision_dataqueue_lock_);
+  return kr;
+}
+
+bool SantaDecisionManager::PostToLogQueue(santa_message_t *message) {
+  bool kr = false;
+  lck_mtx_lock(log_dataqueue_lock_);
+  kr = log_dataqueue_->enqueue(message, sizeof(santa_message_t));
   if (!kr) {
+    if (OSCompareAndSwap(0, 1, &failed_log_queue_requests_)) {
+      LOGW("Dropping log queue messages");
+    }
     // If enqueue failed, pop an item off the queue and try again.
     uint32_t dataSize = sizeof(santa_message_t);
-    dataqueue_->dequeue(0, &dataSize);
-    kr = dataqueue_->enqueue(message, sizeof(santa_message_t));
+    log_dataqueue_->dequeue(0, &dataSize);
+    kr = log_dataqueue_->enqueue(message, sizeof(santa_message_t));
+  } else {
+    OSCompareAndSwap(1, 0, &failed_log_queue_requests_);
   }
-  lck_mtx_unlock(dataqueue_lock_);
+  lck_mtx_unlock(log_dataqueue_lock_);
   return kr;
 }
 
 uint64_t SantaDecisionManager::GetVnodeIDForVnode(
-    const vfs_context_t ctx, const vnode_t vp) {
+    const vfs_context_t ctx, const vnode_t vp) const {
   struct vnode_attr vap;
   VATTR_INIT(&vap);
+  VATTR_WANTED(&vap, va_fsid);
   VATTR_WANTED(&vap, va_fileid);
   vnode_getattr(vp, &vap, ctx);
-  return vap.va_fileid;
+  return (((uint64_t)vap.va_fsid << 32) | vap.va_fileid);
 }
 
 uint64_t SantaDecisionManager::GetCurrentUptime() {
@@ -420,11 +463,11 @@ int SantaDecisionManager::VnodeCallback(const kauth_cred_t cred,
   // closed.
   if (vnode_hasdirtyblks(vp)) {
     CacheCheck(vnode_str);
-    returnedAction = ACTION_RESPOND_CHECKBW_DENY;
+    returnedAction = ACTION_RESPOND_DENY;
   }
 
   switch (returnedAction) {
-    case ACTION_RESPOND_CHECKBW_ALLOW: {
+    case ACTION_RESPOND_ALLOW: {
       proc_t proc = vfs_context_proc(ctx);
       if (proc) {
         SantaPIDAndPPID *pidWrapper = new SantaPIDAndPPID;
@@ -437,7 +480,7 @@ int SantaDecisionManager::VnodeCallback(const kauth_cred_t cred,
       }
       return KAUTH_RESULT_ALLOW;
     }
-    case ACTION_RESPOND_CHECKBW_DENY:
+    case ACTION_RESPOND_DENY:
       *errno = EPERM;
       return KAUTH_RESULT_DENY;
     default:
@@ -478,7 +521,7 @@ void SantaDecisionManager::FileOpCallback(
       }
       lck_rw_unlock_shared(vnode_pid_map_lock_);
 
-      PostToQueue(message);
+      PostToLogQueue(message);
       delete message;
       return;
     }
@@ -493,19 +536,24 @@ void SantaDecisionManager::FileOpCallback(
 
     switch (action) {
       case KAUTH_FILEOP_CLOSE:
-        message->action = ACTION_NOTIFY_WRITE; break;
+        message->action = ACTION_NOTIFY_WRITE;
+        break;
       case KAUTH_FILEOP_RENAME:
-        message->action = ACTION_NOTIFY_RENAME; break;
+        message->action = ACTION_NOTIFY_RENAME;
+        break;
       case KAUTH_FILEOP_LINK:
-        message->action = ACTION_NOTIFY_LINK; break;
+        message->action = ACTION_NOTIFY_LINK;
+        break;
       case KAUTH_FILEOP_EXCHANGE:
-        message->action = ACTION_NOTIFY_EXCHANGE; break;
+        message->action = ACTION_NOTIFY_EXCHANGE;
+        break;
       case KAUTH_FILEOP_DELETE:
-        message->action = ACTION_NOTIFY_DELETE; break;
+        message->action = ACTION_NOTIFY_DELETE;
+        break;
       default: delete message; return;
     }
 
-    PostToQueue(message);
+    PostToLogQueue(message);
     delete message;
   }
 }
@@ -525,7 +573,7 @@ extern "C" int fileop_scope_callback(
   switch (action) {
     case KAUTH_FILEOP_CLOSE:
       if (!(arg2 & KAUTH_FILEOP_CLOSE_MODIFIED)) return KAUTH_RESULT_DEFER;
-      // Intentional fall-through
+    // Intentional fall-through
     case KAUTH_FILEOP_DELETE:
     case KAUTH_FILEOP_EXEC:
       vp = reinterpret_cast<vnode_t>(arg0);

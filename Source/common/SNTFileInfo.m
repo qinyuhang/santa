@@ -18,7 +18,11 @@
 
 #include <mach-o/loader.h>
 #include <mach-o/swap.h>
+#include <pwd.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
+
+#import <FMDB/FMDB.h>
 
 // Simple class to hold the data of a mach_header and the offset within the file
 // in which that header was found.
@@ -42,6 +46,7 @@
 @property NSString *path;
 @property NSFileHandle *fileHandle;
 @property NSUInteger fileSize;
+@property NSString *fileOwnerHomeDir;
 
 // Cached properties
 @property NSBundle *bundleRef;
@@ -57,14 +62,16 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 - (instancetype)initWithPath:(NSString *)path error:(NSError **)error {
   self = [super init];
   if (self) {
-    _path = [self resolvePath:path];
+    NSBundle *bndl;
+    _path = [self resolvePath:path bundle:&bndl];
+    _bundleRef = bndl;
     if (_path.length == 0) {
       if (error) {
         NSString *errStr = @"Unable to resolve empty path";
         if (path) errStr = [@"Unable to resolve path: " stringByAppendingString:path];
         *error = [NSError errorWithDomain:@"com.google.santa.fileinfo"
                                      code:260
-                                 userInfo:@{ NSLocalizedDescriptionKey: errStr }];
+                                 userInfo:@{NSLocalizedDescriptionKey : errStr}];
       }
       return nil;
     }
@@ -76,6 +83,13 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
     _fileSize = fileStat.st_size;
 
     if (_fileSize == 0) return nil;
+
+    if (fileStat.st_uid != 0) {
+      struct passwd *pwd = getpwuid(fileStat.st_uid);
+      if (pwd) {
+        _fileOwnerHomeDir = @(pwd->pw_dir);
+      }
+    }
   }
 
   return self;
@@ -85,16 +99,20 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   return [self initWithPath:path error:NULL];
 }
 
-# pragma mark Hashing
+#pragma mark Hashing
 
-- (NSString *)SHA1 {
+- (void)hashSHA1:(NSString **)sha1 SHA256:(NSString **)sha256 {
   const int chunkSize = 4096;
 
-  CC_SHA1_CTX c;
-  CC_SHA1_Init(&c);
+  CC_SHA1_CTX c1;
+  CC_SHA256_CTX c256;
+
+  if (sha1) CC_SHA1_Init(&c1);
+  if (sha256) CC_SHA256_Init(&c256);
+
   for (uint64_t offset = 0; offset < self.fileSize; offset += chunkSize) {
     @autoreleasepool {
-      int readSize;
+      int readSize = 0;
       if (offset + chunkSize > self.fileSize) {
         readSize = (int)(self.fileSize - offset);
       } else {
@@ -103,64 +121,55 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 
       NSData *chunk = [self safeSubdataWithRange:NSMakeRange(offset, readSize)];
       if (!chunk) {
-        CC_SHA1_Final(NULL, &c);
-        return nil;
+        if (sha1) CC_SHA1_Final(NULL, &c1);
+        if (sha256) CC_SHA256_Final(NULL, &c256);
+        return;
       }
 
-      CC_SHA1_Update(&c, chunk.bytes, readSize);
+      if (sha1) CC_SHA1_Update(&c1, chunk.bytes, readSize);
+      if (sha256) CC_SHA256_Update(&c256, chunk.bytes, readSize);
     }
   }
-  unsigned char sha1[CC_SHA1_DIGEST_LENGTH];
-  CC_SHA1_Final(sha1, &c);
 
-  NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
-  for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; i++) {
-    [buf appendFormat:@"%02x", (unsigned char)sha1[i]];
+  if (sha1) {
+    unsigned char dgst[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1_Final(dgst, &c1);
+
+    NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i) {
+      [buf appendFormat:@"%02x", (unsigned char)dgst[i]];
+    }
+    *sha1 = [buf copy];
   }
+  if (sha256) {
+    unsigned char dgst[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(dgst, &c256);
 
-  return buf;
+    NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; ++i) {
+      [buf appendFormat:@"%02x", (unsigned char)dgst[i]];
+    }
+    *sha256 = [buf copy];
+  }
+}
+
+- (NSString *)SHA1 {
+  NSString *sha1;
+  [self hashSHA1:&sha1 SHA256:NULL];
+  return sha1;
 }
 
 - (NSString *)SHA256 {
-  const int chunkSize = 4096;
-
-  CC_SHA256_CTX c;
-  CC_SHA256_Init(&c);
-  for (uint64_t offset = 0; offset < self.fileSize; offset += chunkSize) {
-    @autoreleasepool {
-      int readSize;
-      if (offset + chunkSize > self.fileSize) {
-        readSize = (int)(self.fileSize - offset);
-      } else {
-        readSize = chunkSize;
-      }
-
-      NSData *chunk = [self safeSubdataWithRange:NSMakeRange(offset, readSize)];
-      if (!chunk) {
-        CC_SHA256_Final(NULL, &c);
-        return nil;
-      }
-
-      CC_SHA256_Update(&c, chunk.bytes, readSize);
-    }
-  }
-  unsigned char sha256[CC_SHA256_DIGEST_LENGTH];
-  CC_SHA256_Final(sha256, &c);
-
-  NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-    [buf appendFormat:@"%02x", (unsigned char)sha256[i]];
-  }
-  
-  return buf;
+  NSString *sha256;
+  [self hashSHA1:NULL SHA256:&sha256];
+  return sha256;
 }
 
-# pragma mark File Type Info
+#pragma mark File Type Info
 
 - (NSArray *)architectures {
   return [self.machHeaders allKeys];
 }
-
 
 - (BOOL)isExecutable {
   struct mach_header *mach_header = [self firstMachHeader];
@@ -197,6 +206,14 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   const char *magic = (const char *)[[self safeSubdataWithRange:NSMakeRange(0, 4)] bytes];
   return (strncmp("xar!", magic, 4) == 0);
 }
+
+- (BOOL)isDMG {
+  NSUInteger last512 = self.fileSize - 512;
+  const char *magic = (const char *)[[self safeSubdataWithRange:NSMakeRange(last512, 4)] bytes];
+  return (strncmp("koly", magic, 4) == 0);
+}
+
+#pragma mark Page Zero
 
 - (BOOL)isMissingPageZero {
   // This method only checks i386 arch because the kernel enforces this for other archs
@@ -307,21 +324,26 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 #pragma mark Quarantine Data
 
 - (NSString *)quarantineDataURL {
-  NSURL *url = [self quarantineData][(__bridge NSString *)kLSQuarantineDataURLKey];
-  return [url absoluteString];
+  NSURL *dataURL = [self quarantineData][@"LSQuarantineDataURL"];
+  if (dataURL == (NSURL *)[NSNull null]) dataURL = nil;
+  return [dataURL absoluteString];
 }
 
 - (NSString *)quarantineRefererURL {
-  NSURL *url = [self quarantineData][(__bridge NSString *)kLSQuarantineOriginURLKey];
-  return [url absoluteString];
+  NSURL *originURL = [self quarantineData][@"LSQuarantineOriginURL"];
+  if (originURL == (NSURL *)[NSNull null]) originURL = nil;
+  return [originURL absoluteString];
 }
 
 - (NSString *)quarantineAgentBundleID {
-  return [self quarantineData][(__bridge NSString *)kLSQuarantineAgentBundleIdentifierKey];
+  NSString *agentBundle = [self quarantineData][@"LSQuarantineAgentBundleIdentifier"];
+  if (agentBundle == (NSString *)[NSNull null]) agentBundle = nil;
+  return agentBundle;
 }
 
 - (NSDate *)quarantineTimestamp {
-  return [self quarantineData][(__bridge NSString *)kLSQuarantineTimeStampKey];
+  NSDate *timeStamp = [self quarantineData][@"LSQuarantineTimeStamp"];
+  return timeStamp;
 }
 
 #pragma mark Internal Methods
@@ -354,7 +376,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
       NSMutableData *fatArchs = [[self safeSubdataWithRange:range] mutableCopy];
       if (fatArchs) {
         struct fat_arch *fat_arch = (struct fat_arch *)[fatArchs mutableBytes];
-        for (int i = 0; i < nfat_arch; i++) {
+        for (int i = 0; i < nfat_arch; ++i) {
           int offset = OSSwapBigToHostInt32(fat_arch[i].offset);
           int size = OSSwapBigToHostInt32(fat_arch[i].size);
           int cputype = OSSwapBigToHostInt(fat_arch[i].cputype);
@@ -417,7 +439,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   offset += sz_header;
 
   // Loop through the load commands looking for the segment named __TEXT
-  for (uint32_t i = 0; i < ncmds; i++) {
+  for (uint32_t i = 0; i < ncmds; ++i) {
     NSData *cmdData = [self safeSubdataWithRange:NSMakeRange(offset, sz_segment)];
     if (!cmdData) return nil;
     struct segment_command_64 *lc = (struct segment_command_64 *)[cmdData bytes];
@@ -432,7 +454,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   }
 
   // Loop through the sections in the __TEXT segment looking for an __info_plist section.
-  for (uint32_t i = 0; i < nsects; i++) {
+  for (uint32_t i = 0; i < nsects; ++i) {
     NSData *sectData = [self safeSubdataWithRange:NSMakeRange(offset, sz_section)];
     if (!sectData) return nil;
     struct section_64 *sect = (struct section_64 *)[sectData bytes];
@@ -477,13 +499,69 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 
 ///
 ///  Retrieve quarantine data for a file and caches the dictionary
+///  This method attempts to handle fetching the quarantine data even if the running user
+///  is not the one who downloaded the file.
 ///
 - (NSDictionary *)quarantineData {
-  if (!self.quarantineDict && NSURLQuarantinePropertiesKey != NULL) {
+  if (!self.quarantineDict && self.fileOwnerHomeDir) {
+    self.quarantineDict = (NSDictionary *)[NSNull null];
+
     NSURL *url = [NSURL fileURLWithPath:self.path];
     NSDictionary *d = [url resourceValuesForKeys:@[ NSURLQuarantinePropertiesKey ] error:NULL];
-    self.quarantineDict = d[NSURLQuarantinePropertiesKey];
-    if (!self.quarantineDict) self.quarantineDict = (NSDictionary *)[NSNull null];
+
+    if (d[NSURLQuarantinePropertiesKey]) {
+      d = d[NSURLQuarantinePropertiesKey];
+
+      if (d[@"LSQuarantineIsOwnedByCurrentUser"]) {
+        self.quarantineDict = d;
+      } else if (d[@"LSQuarantineEventIdentifier"]) {
+        NSMutableDictionary *quarantineDict = [d mutableCopy];
+
+        // If self.path is on a quarantine disk image, LSQuarantineDiskImageURL will point to the
+        // disk image and self.fileOwnerHomeDir will be incorrect (probably root).
+        NSString *fileOwnerHomeDir = self.fileOwnerHomeDir;
+        if (d[@"LSQuarantineDiskImageURL"]) {
+          struct stat fileStat;
+          stat([d[@"LSQuarantineDiskImageURL"] fileSystemRepresentation], &fileStat);
+          if (fileStat.st_uid != 0) {
+            struct passwd *pwd = getpwuid(fileStat.st_uid);
+            if (pwd) {
+              fileOwnerHomeDir = @(pwd->pw_dir);
+            }
+          }
+        }
+
+        NSURL *dbPath = [NSURL fileURLWithPathComponents:@[
+          fileOwnerHomeDir,
+          @"Library",
+          @"Preferences",
+          @"com.apple.LaunchServices.QuarantineEventsV2"
+        ]];
+        FMDatabase *db = [FMDatabase databaseWithPath:[dbPath absoluteString]];
+        db.logsErrors = NO;
+        if ([db open]) {
+          FMResultSet *rs = [db executeQuery:@"SELECT * FROM LSQuarantineEvent "
+                                             @"WHERE LSQuarantineEventIdentifier=?",
+                                             d[@"LSQuarantineEventIdentifier"]];
+          if ([rs next]) {
+            NSString *agentBundleID = [rs stringForColumn:@"LSQuarantineAgentBundleIdentifier"];
+            NSString *dataURLString = [rs stringForColumn:@"LSQuarantineDataURLString"];
+            NSString *originURLString = [rs stringForColumn:@"LSQuarantineOriginURLString"];
+            double timeStamp = [rs doubleForColumn:@"LSQuarantineTimeStamp"];
+
+            quarantineDict[@"LSQuarantineAgentBundleIdentifier"] = agentBundleID;
+            quarantineDict[@"LSQuarantineDataURL"] = [NSURL URLWithString:dataURLString];
+            quarantineDict[@"LSQuarantineOriginURL"] = [NSURL URLWithString:originURLString];
+            quarantineDict[@"LSQuarantineTimestamp"] =
+                [NSDate dateWithTimeIntervalSinceReferenceDate:timeStamp];
+
+            self.quarantineDict = quarantineDict;
+          }
+          [rs close];
+          [db close];
+        }
+      }
+    }
   }
   return (self.quarantineDict == (NSDictionary *)[NSNull null]) ? nil : self.quarantineDict;
 }
@@ -512,9 +590,10 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 ///    + Follows symlinks
 ///    + Converts relative paths to absolute
 ///    + If path is a directory, checks to see if that directory is a bundle and if so
-///      returns the path to that bundles CFBundleExecutable.
+///      returns the path to that bundles CFBundleExecutable and stores a reference to the
+///      bundle in the bundle out-param.
 ///
-- (NSString *)resolvePath:(NSString *)path {
+- (NSString *)resolvePath:(NSString *)path bundle:(NSBundle **)bundle {
   // Convert to absolute, standardized path
   path = [path stringByResolvingSymlinksInPath];
   if (![path isAbsolutePath]) {
@@ -529,14 +608,9 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   if (![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&directory]) {
     return nil;
   } else if (directory) {
-    NSString *infoPath = [path stringByAppendingPathComponent:@"Contents/Info.plist"];
-    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-    if (d && d[@"CFBundleExecutable"]) {
-      path = [path stringByAppendingPathComponent:@"Contents/MacOS"];
-      return [path stringByAppendingPathComponent:d[@"CFBundleExecutable"]];
-    } else {
-      return nil;
-    }
+    NSBundle *bndl = [NSBundle bundleWithPath:path];
+    if (bundle) *bundle = bndl;
+    return [bndl executablePath];
   } else {
     return path;
   }

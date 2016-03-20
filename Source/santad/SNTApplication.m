@@ -12,13 +12,12 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
+#import "SNTApplication.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#import "SNTApplication.h"
-
 #include "SNTCommonEnums.h"
-#include "SNTLogging.h"
 
 #import "SNTConfigurator.h"
 #import "SNTDaemonControlController.h"
@@ -28,20 +27,18 @@
 #import "SNTEventTable.h"
 #import "SNTExecutionController.h"
 #import "SNTFileWatcher.h"
+#import "SNTLogging.h"
+#import "SNTNotificationQueue.h"
 #import "SNTRuleTable.h"
 #import "SNTXPCConnection.h"
 #import "SNTXPCControlInterface.h"
-#import "SNTXPCNotifierInterface.h"
 
 @interface SNTApplication ()
 @property SNTDriverManager *driverManager;
 @property SNTEventLog *eventLog;
-@property SNTEventTable *eventTable;
 @property SNTExecutionController *execController;
 @property SNTFileWatcher *configFileWatcher;
-@property SNTRuleTable *ruleTable;
 @property SNTXPCConnection *controlConnection;
-@property SNTXPCConnection *notifierConnection;
 @end
 
 @implementation SNTApplication
@@ -60,48 +57,45 @@
     }
 
     // Initialize tables
-    _ruleTable = [SNTDatabaseController ruleTable];
-    if (!_ruleTable) {
+    SNTRuleTable *ruleTable = [SNTDatabaseController ruleTable];
+    if (!ruleTable) {
       LOGE(@"Failed to initialize rule table.");
       return nil;
     }
-
-    _eventTable = [SNTDatabaseController eventTable];
-    if (!_eventTable) {
+    SNTEventTable *eventTable = [SNTDatabaseController eventTable];
+    if (!eventTable) {
       LOGE(@"Failed to initialize event table.");
       return nil;
     }
 
-    // Establish XPC listener for GUI agent connections
-    _notifierConnection =
-        [[SNTXPCConnection alloc] initServerWithName:[SNTXPCNotifierInterface serviceId]];
-    _notifierConnection.remoteInterface = [SNTXPCNotifierInterface notifierInterface];
-    [_notifierConnection resume];
+    SNTNotificationQueue *notQueue = [[SNTNotificationQueue alloc] init];
 
     // Establish XPC listener for santactl connections
+    SNTDaemonControlController *dc = [[SNTDaemonControlController alloc] init];
+    dc.driverManager = _driverManager;
+    dc.notQueue = notQueue;
+
     _controlConnection =
         [[SNTXPCConnection alloc] initServerWithName:[SNTXPCControlInterface serviceId]];
     _controlConnection.exportedInterface = [SNTXPCControlInterface controlInterface];
-    _controlConnection.exportedObject =
-        [[SNTDaemonControlController alloc] initWithDriverManager:_driverManager];
+    _controlConnection.exportedObject = dc;
     [_controlConnection resume];
 
-    _configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath
-                                                          handler:^{
-        [[SNTConfigurator configurator] reloadConfigData];
+    _configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath handler:^{
+      [[SNTConfigurator configurator] reloadConfigData];
 
-        // Ensure config file remains root:wheel 0644
-        chown([kDefaultConfigFilePath fileSystemRepresentation], 0, 0);
-        chmod([kDefaultConfigFilePath fileSystemRepresentation], 0644);
+      // Ensure config file remains root:wheel 0644
+      chown([kDefaultConfigFilePath fileSystemRepresentation], 0, 0);
+      chmod([kDefaultConfigFilePath fileSystemRepresentation], 0644);
     }];
 
     _eventLog = [[SNTEventLog alloc] init];
 
     // Initialize the binary checker object
     _execController = [[SNTExecutionController alloc] initWithDriverManager:_driverManager
-                                                                  ruleTable:_ruleTable
-                                                                 eventTable:_eventTable
-                                                         notifierConnection:_notifierConnection
+                                                                  ruleTable:ruleTable
+                                                                 eventTable:eventTable
+                                                              notifierQueue:notQueue
                                                                    eventLog:_eventLog];
     if (!_execController) return nil;
   }
@@ -109,58 +103,74 @@
   return self;
 }
 
-- (void)run {
+- (void)start {
   LOGI(@"Connected to driver, activating.");
 
-  // Create the queues used for execution requests and logging.
+  [self performSelectorInBackground:@selector(beginListeningForDecisionRequests) withObject:nil];
+  [self performSelectorInBackground:@selector(beginListeningForLogRequests) withObject:nil];
+}
+
+- (void)beginListeningForDecisionRequests {
   dispatch_queue_t exec_queue = dispatch_queue_create(
       "com.google.santad.execution_queue", DISPATCH_QUEUE_CONCURRENT);
   dispatch_set_target_queue(exec_queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
 
+  [self.driverManager listenForDecisionRequests:^(santa_message_t message) {
+    @autoreleasepool {
+      switch (message.action) {
+        case ACTION_REQUEST_SHUTDOWN: {
+          LOGI(@"Driver requested a shutdown");
+          exit(0);
+        }
+        case ACTION_REQUEST_BINARY: {
+          dispatch_async(exec_queue, ^{
+            [self.execController validateBinaryWithMessage:message];
+          });
+          break;
+        }
+        default: {
+          LOGE(@"Received decision request without a valid action: %d", message.action);
+          exit(1);
+        }
+      }
+    }
+  }];
+}
+
+- (void)beginListeningForLogRequests {
   dispatch_queue_t log_queue = dispatch_queue_create(
       "com.google.santad.log_queue", DISPATCH_QUEUE_CONCURRENT);
   dispatch_set_target_queue(
       log_queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
 
-  [self.driverManager listenWithBlock:^(santa_message_t message) {
-      @autoreleasepool {
-        switch (message.action) {
-          case ACTION_REQUEST_SHUTDOWN: {
-            LOGI(@"Driver requested a shutdown");
-            exit(0);
-          }
-          case ACTION_NOTIFY_DELETE:
-          case ACTION_NOTIFY_EXCHANGE:
-          case ACTION_NOTIFY_LINK:
-          case ACTION_NOTIFY_RENAME:
-          case ACTION_NOTIFY_WRITE: {
-            dispatch_async(log_queue, ^{
-              NSRegularExpression *re = [[SNTConfigurator configurator] fileChangesRegex];
-              NSString *path = @(message.path);
-              if ([re numberOfMatchesInString:path options:0 range:NSMakeRange(0, path.length)]) {
-                [self.eventLog logFileModification:message];
-              }
-            });
-            break;
-          }
-          case ACTION_NOTIFY_EXEC: {
-            dispatch_async(log_queue, ^{
-              [self.eventLog logAllowedExecution:message];
-            });
-            break;
-          }
-          case ACTION_REQUEST_CHECKBW: {
-            dispatch_async(exec_queue, ^{
-                [self.execController validateBinaryWithMessage:message];
-            });
-            break;
-          }
-          default: {
-            LOGE(@"Received request without a valid action: %d", message.action);
-            exit(1);
-          }
+  [self.driverManager listenForLogRequests:^(santa_message_t message) {
+    @autoreleasepool {
+      switch (message.action) {
+        case ACTION_NOTIFY_DELETE:
+        case ACTION_NOTIFY_EXCHANGE:
+        case ACTION_NOTIFY_LINK:
+        case ACTION_NOTIFY_RENAME:
+        case ACTION_NOTIFY_WRITE: {
+          dispatch_async(log_queue, ^{
+            NSRegularExpression *re = [[SNTConfigurator configurator] fileChangesRegex];
+            NSString *path = @(message.path);
+            if ([re numberOfMatchesInString:path options:0 range:NSMakeRange(0, path.length)]) {
+              [self.eventLog logFileModification:message];
+            }
+          });
+          break;
         }
+        case ACTION_NOTIFY_EXEC: {
+          dispatch_async(log_queue, ^{
+            [self.eventLog logAllowedExecution:message];
+          });
+          break;
+        }
+        default:
+          LOGE(@"Received log request without a valid action: %d", message.action);
+          break;
       }
+    }
   }];
 }
 

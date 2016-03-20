@@ -77,8 +77,8 @@
                                            error:nil];
   CC_SHA256([fData bytes], (unsigned int)[fData length], sha256);
   char buf[CC_SHA256_DIGEST_LENGTH * 2 + 1];
-  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
-    snprintf(buf + (2*i), 4, "%02x", (unsigned char)sha256[i]);
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; ++i) {
+    snprintf(buf + (2 * i), 4, "%02x", (unsigned char)sha256[i]);
   }
   buf[CC_SHA256_DIGEST_LENGTH * 2] = '\0';
   return @(buf);
@@ -89,9 +89,9 @@
 /// Call in-kernel function: |kSantaUserClientAllowBinary| or |kSantaUserClientDenyBinary|
 /// passing the |vnodeID|.
 - (void)postToKernelAction:(santa_action_t)action forVnodeID:(uint64_t)vnodeid {
-  if (action == ACTION_RESPOND_CHECKBW_ALLOW) {
+  if (action == ACTION_RESPOND_ALLOW) {
     IOConnectCallScalarMethod(self.connection, kSantaUserClientAllowBinary, &vnodeid, 1, 0, 0);
-  } else if (action == ACTION_RESPOND_CHECKBW_DENY) {
+  } else if (action == ACTION_RESPOND_DENY) {
     IOConnectCallScalarMethod(self.connection, kSantaUserClientDenyBinary, &vnodeid, 1, 0, 0);
   }
 }
@@ -168,7 +168,6 @@
 
   mach_vm_address_t address = 0;
   mach_vm_size_t size = 0;
-  unsigned int msgType = 1;
 
   TSTART("Allocates a notification port");
   if (!(receivePort = IODataQueueAllocateNotificationPort())) {
@@ -177,7 +176,7 @@
   TPASS();
 
   TSTART("Registers the notification port");
-  kr = IOConnectSetNotificationPort(self.connection, msgType, receivePort, 0);
+  kr = IOConnectSetNotificationPort(self.connection, QUEUETYPE_DECISION, receivePort, 0);
   if (kr != kIOReturnSuccess) {
     mach_port_destroy(mach_task_self(), receivePort);
     TFAILINFO("KR: %d", kr);
@@ -186,7 +185,7 @@
   TPASS();
 
   TSTART("Maps shared memory");
-  kr = IOConnectMapMemory(self.connection, kIODefaultMemoryType, mach_task_self(),
+  kr = IOConnectMapMemory(self.connection, QUEUETYPE_DECISION, mach_task_self(),
                           &address, &size, kIOMapAnywhere);
   if (kr != kIOReturnSuccess) {
     mach_port_destroy(mach_task_self(), receivePort);
@@ -211,23 +210,23 @@
       dataSize = sizeof(vdata);
       kr = IODataQueueDequeue(queueMemory, &vdata, &dataSize);
       if (kr == kIOReturnSuccess) {
-        if (vdata.action != ACTION_REQUEST_CHECKBW) continue;
+        if (vdata.action != ACTION_REQUEST_BINARY) continue;
 
         if ([[self sha256ForPath:@(vdata.path)] isEqual:edSHA]) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_DENY forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_DENY forVnodeID:vdata.vnode_id];
         } else if (strncmp("/bin/mv", vdata.path, strlen("/bin/mv")) == 0) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_DENY forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_DENY forVnodeID:vdata.vnode_id];
         } else if (strncmp("/bin/ls", vdata.path, strlen("/bin/ls")) == 0) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:vdata.vnode_id];
           self.timesSeenLs++;
         } else if (strncmp("/bin/cp", vdata.path, strlen("/bin/cp")) == 0) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:vdata.vnode_id];
           self.timesSeenCp++;
         } else if (strncmp("/bin/cat", vdata.path, strlen("/bin/cat")) == 0) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:vdata.vnode_id];
           self.timesSeenCat++;
         } else if (strncmp("/bin/ln", vdata.path, strlen("/bin/ln")) == 0) {
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:vdata.vnode_id];
 
           TSTART("Sends valid pid/ppid");
           if (vdata.pid < 1 || vdata.ppid < 1) {
@@ -256,13 +255,13 @@
           }
 
           // Allow everything not related to our testing.
-          [self postToKernelAction:ACTION_RESPOND_CHECKBW_ALLOW forVnodeID:vdata.vnode_id];
+          [self postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:vdata.vnode_id];
         }
       } else {
         TFAILINFO("Error receiving data: %d", kr);
       }
     }
-  }  while (IODataQueueWaitForAvailableData(queueMemory, receivePort) == kIOReturnSuccess);
+  } while (IODataQueueWaitForAvailableData(queueMemory, receivePort) == kIOReturnSuccess);
 
   IOConnectUnmapMemory(self.connection, kIODefaultMemoryType, mach_task_self(), address);
   mach_port_destroy(mach_task_self(), receivePort);
@@ -429,10 +428,10 @@
 
   const int LIMIT = 12000;
 
-  for (int i = 0; i < LIMIT; i++) {
+  for (int i = 0; i < LIMIT; ++i) {
     printf("\033[s");  // save cursor position
 
-    printf("%d/%i", i+1, LIMIT);
+    printf("%d/%i", i + 1, LIMIT);
 
     NSString *fname = [@"testexe" stringByAppendingFormat:@".%i", i];
     [[NSFileManager defaultManager] copyItemAtPath:@"/bin/hostname" toPath:fname error:NULL];
