@@ -265,7 +265,7 @@
 
   // Loop through the string one character at a time, looking for the characters
   // we want to remove.
-  for (const char *p = str; (c = *p) != 0; p++) {
+  for (NSUInteger i = 0; i < length && (c = str[i]); ++i) {
     if (c == '|' || c == '\n' || c == '\r') {
       if (!buf) {
         // If string size * 6 is more than 64KiB use malloc, otherwise use stack space.
@@ -278,12 +278,11 @@
       }
 
       // Copy from the last offset up to the character we just found into the buffer
-      ptrdiff_t diff = p - str;
-      memcpy(buf + bufOffset, str + strOffset, diff - strOffset);
+      memcpy(buf + bufOffset, str + strOffset, i - strOffset);
 
       // Update the buffer and string offsets
-      bufOffset += diff - strOffset;
-      strOffset = diff + 1;
+      bufOffset += i - strOffset;
+      strOffset = i + 1;
 
       // Replace the found character and advance the buffer offset
       switch (c) {
