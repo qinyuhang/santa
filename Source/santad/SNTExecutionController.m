@@ -22,6 +22,7 @@
 
 #import "MOLCertificate.h"
 #import "MOLCodesignChecker.h"
+#import "SNTBlockMessage.h"
 #import "SNTCachedDecision.h"
 #import "SNTCommonEnums.h"
 #import "SNTConfigurator.h"
@@ -34,6 +35,17 @@
 #import "SNTRule.h"
 #import "SNTRuleTable.h"
 #import "SNTStoredEvent.h"
+
+@interface SNTExecutionController ()
+@property SNTDriverManager *driverManager;
+@property SNTEventLog *eventLog;
+@property SNTEventTable *eventTable;
+@property SNTNotificationQueue *notifierQueue;
+@property SNTRuleTable *ruleTable;
+
+@property NSMutableDictionary *uploadBackoff;
+@property dispatch_queue_t eventUploadQueue;
+@end
 
 @implementation SNTExecutionController
 
@@ -52,6 +64,10 @@
     _notifierQueue = notifierQueue;
     _eventLog = eventLog;
 
+    _uploadBackoff = [NSMutableDictionary dictionaryWithCapacity:128];
+    _eventUploadQueue = dispatch_queue_create("com.google.santad.event_upload",
+                                              DISPATCH_QUEUE_SERIAL);
+
     // This establishes the XPC connection between libsecurity and syspolicyd.
     // Not doing this causes a deadlock as establishing this link goes through xpcproxy.
     (void)[[MOLCodesignChecker alloc] initWithSelf];
@@ -61,17 +77,17 @@
 
 #pragma mark Binary Validation
 
-- (santa_eventstate_t)makeDecision:(SNTCachedDecision *)cd binaryInfo:(SNTFileInfo *)fi {
+- (SNTEventState)makeDecision:(SNTCachedDecision *)cd binaryInfo:(SNTFileInfo *)fi {
   SNTRule *rule = [self.ruleTable binaryRuleForSHA256:cd.sha256];
   if (rule) {
     switch (rule.state) {
-      case RULESTATE_WHITELIST:
-        return EVENTSTATE_ALLOW_BINARY;
-      case RULESTATE_SILENT_BLACKLIST:
+      case SNTRuleStateWhitelist:
+        return SNTEventStateAllowBinary;
+      case SNTRuleStateSilentBlacklist:
         cd.silentBlock = YES;
-      case RULESTATE_BLACKLIST:
+      case SNTRuleStateBlacklist:
         cd.customMsg = rule.customMsg;
-        return EVENTSTATE_BLOCK_BINARY;
+        return SNTEventStateBlockBinary;
       default: break;
     }
   }
@@ -79,13 +95,13 @@
   rule = [self.ruleTable certificateRuleForSHA256:cd.certSHA256];
   if (rule) {
     switch (rule.state) {
-      case RULESTATE_WHITELIST:
-        return EVENTSTATE_ALLOW_CERTIFICATE;
-      case RULESTATE_SILENT_BLACKLIST:
+      case SNTRuleStateWhitelist:
+        return SNTEventStateAllowCertificate;
+      case SNTRuleStateSilentBlacklist:
         cd.silentBlock = YES;
-      case RULESTATE_BLACKLIST:
+      case SNTRuleStateBlacklist:
         cd.customMsg = rule.customMsg;
-        return EVENTSTATE_BLOCK_CERTIFICATE;
+        return SNTEventStateBlockCertificate;
       default: break;
     }
   }
@@ -93,19 +109,19 @@
   NSString *msg = [self fileIsScopeBlacklisted:fi];
   if (msg) {
     cd.decisionExtra = msg;
-    return EVENTSTATE_BLOCK_SCOPE;
+    return SNTEventStateBlockScope;
   }
 
   msg = [self fileIsScopeWhitelisted:fi];
   if (msg) {
     cd.decisionExtra = msg;
-    return EVENTSTATE_ALLOW_SCOPE;
+    return SNTEventStateAllowScope;
   }
 
   switch ([[SNTConfigurator configurator] clientMode]) {
-    case CLIENTMODE_MONITOR: return EVENTSTATE_ALLOW_UNKNOWN;
-    case CLIENTMODE_LOCKDOWN: return EVENTSTATE_BLOCK_UNKNOWN;
-    default: return EVENTSTATE_BLOCK_UNKNOWN;
+    case SNTClientModeMonitor: return SNTEventStateAllowUnknown;
+    case SNTClientModeLockdown: return SNTEventStateBlockUnknown;
+    default: return SNTEventStateBlockUnknown;
   }
 }
 
@@ -119,6 +135,9 @@
                                 forVnodeID:message.vnode_id];
     return;
   }
+
+  // PrinterProxy workaround, see description above the method for more details.
+  if ([self printerProxyWorkaround:binInfo]) return;
 
   // Get codesigning info about the file.
   MOLCodesignChecker *csInfo = [[MOLCodesignChecker alloc] initWithBinaryPath:binInfo.path];
@@ -140,9 +159,9 @@
   [self.driverManager postToKernelAction:action forVnodeID:cd.vnodeId];
 
   // Log to database if necessary.
-  if (cd.decision != EVENTSTATE_ALLOW_BINARY &&
-      cd.decision != EVENTSTATE_ALLOW_CERTIFICATE &&
-      cd.decision != EVENTSTATE_ALLOW_SCOPE) {
+  if (cd.decision != SNTEventStateAllowBinary &&
+      cd.decision != SNTEventStateAllowCertificate &&
+      cd.decision != SNTEventStateAllowScope) {
     SNTStoredEvent *se = [[SNTStoredEvent alloc] init];
     se.occurrenceDate = [[NSDate alloc] init];
     se.fileSHA256 = cd.sha256;
@@ -154,27 +173,26 @@
     se.ppid = @(message.ppid);
     se.parentName = @(message.pname);
 
+    // Bundle data
     se.fileBundleID = [binInfo bundleIdentifier];
     se.fileBundleName = [binInfo bundleName];
-
+    se.fileBundlePath = [binInfo bundlePath];
     if ([binInfo bundleShortVersionString]) {
       se.fileBundleVersionString = [binInfo bundleShortVersionString];
     }
-
     if ([binInfo bundleVersion]) {
       se.fileBundleVersion = [binInfo bundleVersion];
     }
 
+    // User data
     struct passwd *user = getpwuid(message.uid);
-    if (user) {
-      se.executingUser = @(user->pw_name);
-    }
-
+    if (user) se.executingUser = @(user->pw_name);
     NSArray *loggedInUsers, *currentSessions;
     [self loggedInUsers:&loggedInUsers sessions:&currentSessions];
     se.currentSessions = currentSessions;
     se.loggedInUsers = loggedInUsers;
 
+    // Quarantine data
     se.quarantineDataURL = binInfo.quarantineDataURL;
     se.quarantineRefererURL = binInfo.quarantineRefererURL;
     se.quarantineTimestamp = binInfo.quarantineTimestamp;
@@ -188,9 +206,25 @@
 
       // So the server has something to show the user straight away, initiate an event
       // upload for the blocked binary rather than waiting for the next sync.
-      [self initiateEventUploadForEvent:se];
+      dispatch_async(self.eventUploadQueue, ^{
+        [self initiateEventUploadForEvent:se];
+      });
 
       if (!cd.silentBlock) {
+        // Let the user know what happened, both on the terminal and in the GUI.
+        NSAttributedString *s = [SNTBlockMessage attributedBlockMessageForEvent:se
+                                                                  customMessage:cd.customMsg];
+        NSString *msg = [NSString stringWithFormat:@"\033[1mSanta\033[0m\n\n%@\n\n", s.string];
+        msg = [msg stringByAppendingFormat:@"\033[1mPath:\033[0m %@\n"
+                                           @"\033[1mIdentifier:\033[0m %@\n"
+                                           @"\033[1mParent:\033[0m %@ (%@)\n\n",
+                  se.filePath, se.fileSHA256, se.parentName, se.ppid];
+        NSURL *detailURL = [SNTBlockMessage eventDetailURLForEvent:se];
+        if (detailURL) {
+          msg = [msg stringByAppendingFormat:@"%@\n\n", detailURL.absoluteString];
+        }
+        [self printMessage:msg toTTYForPID:message.ppid];
+
         [self.notifierQueue addEvent:se customMessage:cd.customMsg];
       }
     }
@@ -236,6 +270,47 @@
   return nil;
 }
 
+/**
+  Workaround for issue with PrinterProxy.app.
+ 
+  Every time a new printer is added to the machine, a copy of the PrinterProxy.app is copied from
+  the Print.framework to ~/Library/Printers with the name of the printer as the name of the app.
+  The binary inside is changed slightly (in a way that is unique to the printer name) and then 
+  re-signed with an adhoc signature. I don't know why this is done but it seems that the binary 
+  itself doesn't need to be changed as copying the old one back in-place seems to work,
+  so that's what we do.
+ 
+  If this workaround is applied the decision request is not responded to as the existing request
+  is invalidated when the file is closed which will trigger a brand new request coming from the
+  kernel.
+ 
+  @param fi, SNTFileInfo object for the binary being executed.
+  @return YES if the workaround was applied, NO otherwise.
+*/
+- (BOOL)printerProxyWorkaround:(SNTFileInfo *)fi {
+  if ([fi.path hasSuffix:@"/Contents/MacOS/PrinterProxy"] &&
+      [fi.path containsString:@"Library/Printers"]) {
+    NSString *proxyPath = (@"/System/Library/Frameworks/Carbon.framework/Versions/Current/"
+                           @"Frameworks/Print.framework/Versions/Current/Plugins/PrinterProxy.app/"
+                           @"Contents/MacOS/PrinterProxy");
+    SNTFileInfo *proxyFi = [[SNTFileInfo alloc] initWithPath:proxyPath];
+    if ([proxyFi.SHA256 isEqual:fi.SHA256]) return NO;
+
+    NSFileHandle *inFh = [NSFileHandle fileHandleForReadingAtPath:proxyPath];
+    NSFileHandle *outFh = [NSFileHandle fileHandleForWritingAtPath:fi.path];
+    [outFh writeData:[inFh readDataToEndOfFile]];
+    [inFh closeFile];
+    [outFh truncateFileAtOffset:[outFh offsetInFile]];
+    [outFh synchronizeFile];
+    [outFh closeFile];
+
+    LOGW(@"PrinterProxy workaround applied to %@", fi.path);
+
+    return YES;
+  }
+  return NO;
+}
+
 - (void)initiateEventUploadForEvent:(SNTStoredEvent *)event {
   // The event upload is skipped if the full path is equal to that of santactl so that
   // on the off chance that santactl is not whitelisted, we don't get into an infinite loop.
@@ -244,33 +319,58 @@
       ![[SNTConfigurator configurator] syncBaseURL] ||
       [[SNTConfigurator configurator] syncBackOff]) return;
 
+  // The event upload is skipped if an event upload has been initiated for it in the
+  // last 10 minutes.
+  NSDate *backoff = self.uploadBackoff[event.fileSHA256];
+
+  NSDate *now = [NSDate date];
+  if (([now timeIntervalSince1970] - [backoff timeIntervalSince1970]) < 600) return;
+
+  self.uploadBackoff[event.fileSHA256] = now;
+
   if (fork() == 0) {
     // Ensure we have no privileges
     if (!DropRootPrivileges()) {
       _exit(EPERM);
     }
 
-    _exit(execl(kSantaCtlPath, kSantaCtlPath, "sync", "singleevent",
-                [event.fileSHA256 UTF8String], NULL));
+    _exit(execl(kSantaCtlPath, kSantaCtlPath, "sync", "--syslog",
+                "singleevent", [event.fileSHA256 UTF8String], NULL));
   }
 }
 
-- (santa_action_t)actionForEventState:(santa_eventstate_t)state {
+- (santa_action_t)actionForEventState:(SNTEventState)state {
   switch (state) {
-    case EVENTSTATE_ALLOW_BINARY:
-    case EVENTSTATE_ALLOW_CERTIFICATE:
-    case EVENTSTATE_ALLOW_SCOPE:
-    case EVENTSTATE_ALLOW_UNKNOWN:
+    case SNTEventStateAllowBinary:
+    case SNTEventStateAllowCertificate:
+    case SNTEventStateAllowScope:
+    case SNTEventStateAllowUnknown:
       return ACTION_RESPOND_ALLOW;
-    case EVENTSTATE_BLOCK_BINARY:
-    case EVENTSTATE_BLOCK_CERTIFICATE:
-    case EVENTSTATE_BLOCK_SCOPE:
-    case EVENTSTATE_BLOCK_UNKNOWN:
+    case SNTEventStateBlockBinary:
+    case SNTEventStateBlockCertificate:
+    case SNTEventStateBlockScope:
+    case SNTEventStateBlockUnknown:
       return ACTION_RESPOND_DENY;
     default:
-      LOGW(@"Invalid event state %d", state);
+      LOGW(@"Invalid event state %ld", state);
       return ACTION_RESPOND_DENY;
   }
+}
+
+- (void)printMessage:(NSString *)msg toTTYForPID:(pid_t)pid {
+  if (pid < 2) return;  // don't bother even looking for launchd.
+
+  struct proc_bsdinfo taskInfo = {};
+  if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0,  &taskInfo, sizeof(taskInfo)) < 1) {
+    return;
+  }
+
+  NSString *devPath = [NSString stringWithFormat:@"/dev/%s", devname(taskInfo.e_tdev, S_IFCHR)];
+  int fd = open(devPath.UTF8String, O_WRONLY | O_NOCTTY);
+  @try {
+    NSFileHandle *fh = [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
+    [fh writeData:[msg dataUsingEncoding:NSUTF8StringEncoding]];
+  } @catch (NSException *) { /* do nothing */ }
 }
 
 - (void)loggedInUsers:(NSArray **)users sessions:(NSArray **)sessions {

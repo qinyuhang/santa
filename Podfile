@@ -7,34 +7,42 @@ target :Santa do
   pod 'MOLCodesignChecker'
 end
 
-target :santactl do
+target :santad do
+  pod 'FMDB'
   pod 'MOLCertificate'
   pod 'MOLCodesignChecker'
-  pod 'FMDB'
 end
 
-target :santad do
+target :santactl do
+  pod 'FMDB'
+  pod 'MOLAuthenticatingURLSession'
   pod 'MOLCertificate'
   pod 'MOLCodesignChecker'
-  pod 'FMDB'
-
-  post_install do |installer|
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        if config.name != 'Release' then
-          break
-        end
-
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ''
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] <<= "NDEBUG=1"
-      end
-    end
-  end
 end
 
 target :LogicTests do
   pod 'FMDB'
+  pod 'MOLAuthenticatingURLSession'
   pod 'MOLCertificate'
   pod 'MOLCodesignChecker'
   pod 'OCMock'
 end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      if config.name != 'Release' then
+        break
+      end
+
+      # This is necessary to get FMDB to not NSLog stuff.
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ''
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] <<= "NDEBUG=1"
+
+      # Enable more compiler optimizations.
+      config.build_settings['GCC_OPTIMIZATION_LEVEL'] = 'fast'
+      config.build_settings['LLVM_LTO'] = 'YES'
+    end
+  end
+end
+

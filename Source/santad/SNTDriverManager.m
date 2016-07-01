@@ -14,10 +14,10 @@
 
 #import "SNTDriverManager.h"
 
-#include <IOKit/IODataQueueClient.h>
-#include <mach/mach.h>
+#import <IOKit/IODataQueueClient.h>
+#import <IOKit/Kext/KextManager.h>
 
-#include "SNTLogging.h"
+#import "SNTLogging.h"
 
 @interface SNTDriverManager ()
 @property io_connect_t connection;
@@ -40,6 +40,9 @@ static const int MAX_DELAY = 15;
       LOGD(@"Failed to create matching dictionary");
       return nil;
     }
+
+    // Attempt to load driver. It may already be running, so ignore any return value.
+    KextManagerLoadKextWithIdentifier(CFSTR(USERCLIENT_ID), NULL);
 
     // Locate driver. Wait for it if necessary.
     int delay = 1;
@@ -182,6 +185,19 @@ static const int MAX_DELAY = 15;
 - (BOOL)flushCache {
   return IOConnectCallScalarMethod(self.connection,
                                    kSantaUserClientClearCache, 0, 0, 0, 0) == KERN_SUCCESS;
+}
+
+- (santa_action_t)checkCache:(uint64_t)vnodeID {
+  uint32_t input_count = 1;
+  uint64_t vnode_action = 0;
+  
+  IOConnectCallScalarMethod(self.connection,
+                            kSantaUserClientCheckCache,
+                            &vnodeID,
+                            1,
+                            &vnode_action,
+                            &input_count);
+  return (santa_action_t)vnode_action;
 }
 
 @end

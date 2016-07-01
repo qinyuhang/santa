@@ -17,10 +17,36 @@
 #import <SecurityInterface/SFCertificatePanel.h>
 
 #import "MOLCertificate.h"
+#import "SNTBlockMessage.h"
 #import "SNTConfigurator.h"
 #import "SNTFileInfo.h"
 #import "SNTMessageWindow.h"
 #import "SNTStoredEvent.h"
+
+@interface SNTMessageWindowController ()
+///  The execution event that this window is for
+@property SNTStoredEvent *event;
+
+///  The custom message to display for this event
+@property(copy) NSString *customMessage;
+
+///  A 'friendly' string representing the certificate information
+@property(readonly, nonatomic) NSString *publisherInfo;
+
+///  An optional message to display with this block.
+@property(readonly, nonatomic) NSAttributedString *attributedCustomMessage;
+
+///  Reference to the "Open Event" button in the XIB. Used to either remove the button
+///  if it isn't needed or set its title if it is.
+@property IBOutlet NSButton *openEventButton;
+
+///  Reference to the "Application Name" label in the XIB. Used to remove if application
+///  doesn't have a CFBundleName.
+@property IBOutlet NSTextField *applicationNameLabel;
+
+///  Linked to checkbox in UI to prevent future notifications for this binary.
+@property BOOL silenceFutureNotifications;
+@end
 
 @implementation SNTMessageWindowController
 
@@ -28,7 +54,7 @@
   self = [super initWithWindowNibName:@"MessageWindow"];
   if (self) {
     _event = event;
-    _customMessage = (message != (NSString *)[NSNull null] ? message : nil);
+    _customMessage = message;
   }
   return self;
 }
@@ -61,7 +87,13 @@
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-  if (self.delegate) [self.delegate windowDidClose];
+  if (!self.delegate) return;
+
+  if (self.silenceFutureNotifications) {
+    [self.delegate windowDidCloseSilenceHash:self.event.fileSHA256];
+  } else {
+    [self.delegate windowDidCloseSilenceHash:nil];
+  }
 }
 
 - (IBAction)showCertInfo:(id)sender {
@@ -80,18 +112,9 @@
 }
 
 - (IBAction)openEventDetails:(id)sender {
-  SNTConfigurator *config = [SNTConfigurator configurator];
-
-  NSString *formatStr = config.eventDetailURL;
-  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%file_sha%"
-                                                   withString:self.event.fileSHA256];
-  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%username%"
-                                                   withString:self.event.executingUser];
-  formatStr = [formatStr stringByReplacingOccurrencesOfString:@"%machine_id%"
-                                                   withString:config.machineID];
-
+  NSURL *url = [SNTBlockMessage eventDetailURLForEvent:self.event];
   [self closeWindow:sender];
-  [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:formatStr]];
+  [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
 #pragma mark Generated properties
@@ -119,39 +142,8 @@
 }
 
 - (NSAttributedString *)attributedCustomMessage {
-  NSString *htmlHeader = @"<html><head><style>"
-                         @"body {"
-                         @"  font-family: 'Lucida Grande', 'Helvetica', sans-serif;"
-                         @"  font-size: 13px;"
-                         @"  color: #AAA;"
-                         @"  text-align: center;"
-                         @"}"
-                         @"</style></head><body>";
-  NSString *htmlFooter = @"</body></html>";
-
-  NSString *message;
-  if (self.customMessage.length) {
-    message = self.customMessage;
-  } else if (self.event.decision == EVENTSTATE_BLOCK_UNKNOWN) {
-    message = [[SNTConfigurator configurator] unknownBlockMessage];
-    if (!message) {
-      message = @"The following application has been blocked from executing<br />"
-                @"because its trustworthiness cannot be determined.";
-    }
-  } else {
-    message = [[SNTConfigurator configurator] bannedBlockMessage];
-    if (!message) {
-      message = @"The following application has been blocked from executing<br />"
-                @"because it has been deemed malicious.";
-    }
-  }
-
-  NSString *fullHTML = [NSString stringWithFormat:@"%@%@%@", htmlHeader, message, htmlFooter];
-
-  NSData *htmlData = [fullHTML dataUsingEncoding:NSUTF8StringEncoding];
-  NSAttributedString *returnStr = [[NSAttributedString alloc] initWithHTML:htmlData
-                                                        documentAttributes:NULL];
-  return returnStr;
+  return [SNTBlockMessage attributedBlockMessageForEvent:self.event
+                                           customMessage:self.customMessage];
 }
 
 @end

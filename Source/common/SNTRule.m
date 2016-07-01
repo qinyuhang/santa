@@ -17,8 +17,8 @@
 @implementation SNTRule
 
 - (instancetype)initWithShasum:(NSString *)shasum
-                         state:(santa_rulestate_t)state
-                          type:(santa_ruletype_t)type
+                         state:(SNTRuleState)state
+                          type:(SNTRuleType)type
                      customMsg:(NSString *)customMsg {
   self = [super init];
   if (self) {
@@ -77,7 +77,7 @@
 }
 
 - (NSString *)description {
-  return [NSString stringWithFormat:@"SNTRule: SHA-256: %@, State: %d, Type: %d",
+  return [NSString stringWithFormat:@"SNTRule: SHA-256: %@, State: %ld, Type: %ld",
                                     self.shasum, self.state, self.type];
 }
 

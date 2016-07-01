@@ -12,7 +12,7 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-#include "SNTCommonEnums.h"
+#import "SNTCommonEnums.h"
 
 ///
 ///  Represents an event stored in the database.
@@ -35,9 +35,15 @@
 @property NSString *filePath;
 
 ///
-///  If the executed file was part of the bundle, this is the CFBundleName.
+///  If the executed file was part of the bundle, this is the CFBundleDisplayName, if it exists
+///  or the CFBundleName if not.
 ///
 @property NSString *fileBundleName;
+
+///
+///  If the executed file was part of the bundle, this is the path to the bundle.
+///
+@property NSString *fileBundlePath;
 
 ///
 ///  If the executed file was part of the bundle, this is the CFBundleID.
@@ -73,7 +79,7 @@
 ///
 ///  The decision santad returned.
 ///
-@property santa_eventstate_t decision;
+@property SNTEventState decision;
 
 ///
 ///  NSArray of logged in users when the decision was made.

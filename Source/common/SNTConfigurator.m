@@ -44,9 +44,12 @@ static NSString *const kEnablePageZeroProtectionKey = @"EnablePageZeroProtection
 
 static NSString *const kMoreInfoURLKey = @"MoreInfoURL";
 static NSString *const kEventDetailURLKey = @"EventDetailURL";
+static NSString *const kEventDetailBundleURLKey = @"EventDetailBundleURL";
 static NSString *const kEventDetailTextKey = @"EventDetailText";
 static NSString *const kUnknownBlockMessage = @"UnknownBlockMessage";
 static NSString *const kBannedBlockMessage = @"BannedBlockMessage";
+static NSString *const kModeNotificationMonitor = @"ModeNotificationMonitor";
+static NSString *const kModeNotificationLockdown = @"ModeNotificationLockdown";
 
 static NSString *const kSyncBaseURLKey = @"SyncBaseURL";
 static NSString *const kSyncLastSuccess = @"SyncLastSuccess";
@@ -96,20 +99,23 @@ static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
 
 #pragma mark Public Interface
 
-- (santa_clientmode_t)clientMode {
-  int cm = [self.configData[kClientModeKey] intValue];
-  if (cm > CLIENTMODE_UNKNOWN && cm < CLIENTMODE_MAX) {
-    return (santa_clientmode_t)cm;
+- (SNTClientMode)clientMode {
+  NSInteger cm = [self.configData[kClientModeKey] longValue];
+  if (cm == SNTClientModeMonitor || cm == SNTClientModeLockdown) {
+    return (SNTClientMode)cm;
   } else {
-    self.configData[kClientModeKey] = @(CLIENTMODE_MONITOR);
-    return CLIENTMODE_MONITOR;
+    LOGE(@"Client mode was set to bad value: %ld. Resetting to MONITOR.", cm);
+    self.configData[kClientModeKey] = @(SNTClientModeMonitor);
+    return SNTClientModeMonitor;
   }
 }
 
-- (void)setClientMode:(santa_clientmode_t)newMode {
-  if (newMode > CLIENTMODE_UNKNOWN && newMode < CLIENTMODE_MAX) {
+- (void)setClientMode:(SNTClientMode)newMode {
+  if (newMode == SNTClientModeMonitor || newMode == SNTClientModeLockdown) {
     self.configData[kClientModeKey] = @(newMode);
     [self saveConfigToDisk];
+  } else {
+    LOGW(@"Ignoring request to change client mode to %ld", newMode);
   }
 }
 
@@ -189,6 +195,10 @@ static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
   return self.configData[kEventDetailURLKey];
 }
 
+- (NSString *)eventDetailBundleURL {
+  return self.configData[kEventDetailBundleURLKey];
+}
+
 - (NSString *)eventDetailText {
   return self.configData[kEventDetailTextKey];
 }
@@ -199,6 +209,14 @@ static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
 
 - (NSString *)bannedBlockMessage {
   return self.configData[kBannedBlockMessage];
+}
+
+- (NSString *)modeNotificationMonitor {
+  return self.configData[kModeNotificationMonitor];
+}
+
+- (NSString *)modeNotificationLockdown {
+  return self.configData[kModeNotificationLockdown];
 }
 
 - (NSURL *)syncBaseURL {
@@ -300,7 +318,8 @@ static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
                                             options:NSDataReadingMappedIfSafe
                                               error:&error];
   if (error) {
-    LOGE(@"Could not read configuration file: %@", [error localizedDescription]);
+    LOGE(@"Could not read configuration file: %@, replacing.", [error localizedDescription]);
+    [self saveConfigToDisk];
     return;
   }
 
@@ -310,7 +329,8 @@ static NSString *const kMachineIDPlistKeyKey = @"MachineIDKey";
                                                  format:NULL
                                                   error:&error];
   if (error) {
-    LOGE(@"Could not parse configuration file: %@", [error localizedDescription]);
+    LOGE(@"Could not parse configuration file: %@, replacing.", [error localizedDescription]);
+    [self saveConfigToDisk];
     return;
   }
 

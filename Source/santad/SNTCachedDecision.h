@@ -12,7 +12,7 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-#include "SNTCommonEnums.h"
+#import "SNTCommonEnums.h"
 
 ///
 ///  Store information about executions from decision making for later logging.
@@ -20,7 +20,7 @@
 @interface SNTCachedDecision : NSObject
 
 @property uint64_t vnodeId;
-@property santa_eventstate_t decision;
+@property SNTEventState decision;
 @property NSString *decisionExtra;
 @property NSString *sha256;
 @property NSString *certSHA256;

@@ -34,6 +34,7 @@
   ENCODE(self.filePath, @"filePath");
 
   ENCODE(self.fileBundleName, @"fileBundleName");
+  ENCODE(self.fileBundlePath, @"fileBundlePath");
   ENCODE(self.fileBundleID, @"fileBundleID");
   ENCODE(self.fileBundleVersion, @"fileBundleVersion");
   ENCODE(self.fileBundleVersionString, @"fileBundleVersionString");
@@ -64,6 +65,7 @@
     _filePath = DECODE(NSString, @"filePath");
 
     _fileBundleName = DECODE(NSString, @"fileBundleName");
+    _fileBundlePath = DECODE(NSString, @"fileBundlePath");
     _fileBundleID = DECODE(NSString, @"fileBundleID");
     _fileBundleVersion = DECODE(NSString, @"fileBundleVersion");
     _fileBundleVersionString = DECODE(NSString, @"fileBundleVersionString");
@@ -72,7 +74,7 @@
 
     _executingUser = DECODE(NSString, @"executingUser");
     _occurrenceDate = DECODE(NSDate, @"occurrenceDate");
-    _decision = (santa_eventstate_t)[DECODE(NSNumber, @"decision") intValue];
+    _decision = (SNTEventState)[DECODE(NSNumber, @"decision") intValue];
     _pid = DECODE(NSNumber, @"pid");
     _ppid = DECODE(NSNumber, @"ppid");
     _parentName = DECODE(NSString, @"parentName");

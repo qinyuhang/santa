@@ -102,7 +102,9 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 #pragma mark Hashing
 
 - (void)hashSHA1:(NSString **)sha1 SHA256:(NSString **)sha256 {
-  const int chunkSize = 4096;
+  const int MAX_CHUNK_SIZE = 256 * 1024;  // 256 KB
+  const size_t chunkSize = _fileSize > MAX_CHUNK_SIZE ? MAX_CHUNK_SIZE : _fileSize;
+  char chunk[chunkSize];
 
   CC_SHA1_CTX c1;
   CC_SHA256_CTX c256;
@@ -110,46 +112,59 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   if (sha1) CC_SHA1_Init(&c1);
   if (sha256) CC_SHA256_Init(&c256);
 
-  for (uint64_t offset = 0; offset < self.fileSize; offset += chunkSize) {
-    @autoreleasepool {
-      int readSize = 0;
-      if (offset + chunkSize > self.fileSize) {
-        readSize = (int)(self.fileSize - offset);
-      } else {
-        readSize = chunkSize;
-      }
+  int fd = self.fileHandle.fileDescriptor;
 
-      NSData *chunk = [self safeSubdataWithRange:NSMakeRange(offset, readSize)];
-      if (!chunk) {
-        if (sha1) CC_SHA1_Final(NULL, &c1);
-        if (sha256) CC_SHA256_Final(NULL, &c256);
-        return;
-      }
+  fcntl(fd, F_RDAHEAD, 1);
+  struct radvisory radv;
+  radv.ra_offset = 0;
+  const int MAX_ADVISORY_READ = 10 * 1024 * 1024;
+  radv.ra_count = (int)_fileSize < MAX_ADVISORY_READ ? (int)_fileSize : MAX_ADVISORY_READ;
+  fcntl(fd, F_RDADVISE, &radv);
+  ssize_t bytesRead;
 
-      if (sha1) CC_SHA1_Update(&c1, chunk.bytes, readSize);
-      if (sha256) CC_SHA256_Update(&c256, chunk.bytes, readSize);
+  for (uint64_t offset = 0; offset < _fileSize;) {
+    bytesRead = pread(fd, chunk, chunkSize, offset);
+    if (bytesRead > 0) {
+      if (sha1) CC_SHA1_Update(&c1, chunk, (CC_LONG)bytesRead);
+      if (sha256) CC_SHA256_Update(&c256, chunk, (CC_LONG)bytesRead);
+      offset += bytesRead;
+    } else if (bytesRead == -1 && errno == EINTR) {
+      continue;
+    } else {
+      return;
     }
   }
 
+  // We turn off Read Ahead that we turned on
+  fcntl(fd, F_RDAHEAD, 0);
   if (sha1) {
-    unsigned char dgst[CC_SHA1_DIGEST_LENGTH];
-    CC_SHA1_Final(dgst, &c1);
-
-    NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA1_DIGEST_LENGTH * 2];
-    for (int i = 0; i < CC_SHA1_DIGEST_LENGTH; ++i) {
-      [buf appendFormat:@"%02x", (unsigned char)dgst[i]];
-    }
-    *sha1 = [buf copy];
+    unsigned char digest[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1_Final(digest, &c1);
+    NSString *const SHA1FormatString =
+        @"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x";
+    *sha1 = [[NSString alloc]
+        initWithFormat:SHA1FormatString, digest[0], digest[1], digest[2],
+                       digest[3], digest[4], digest[5], digest[6], digest[7],
+                       digest[8], digest[9], digest[10], digest[11], digest[12],
+                       digest[13], digest[14], digest[15], digest[16],
+                       digest[17], digest[18], digest[19]];
   }
   if (sha256) {
-    unsigned char dgst[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256_Final(dgst, &c256);
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(digest, &c256);
+    NSString *const SHA256FormatString =
+        @"%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+         "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x";
 
-    NSMutableString *buf = [[NSMutableString alloc] initWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; ++i) {
-      [buf appendFormat:@"%02x", (unsigned char)dgst[i]];
-    }
-    *sha256 = [buf copy];
+    *sha256 = [[NSString alloc]
+        initWithFormat:SHA256FormatString, digest[0], digest[1], digest[2],
+                       digest[3], digest[4], digest[5], digest[6], digest[7],
+                       digest[8], digest[9], digest[10], digest[11], digest[12],
+                       digest[13], digest[14], digest[15], digest[16],
+                       digest[17], digest[18], digest[19], digest[20],
+                       digest[21], digest[22], digest[23], digest[24],
+                       digest[25], digest[26], digest[27], digest[28],
+                       digest[29], digest[30], digest[31]];
   }
 }
 
@@ -199,18 +214,18 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 
 - (BOOL)isScript {
   const char *magic = (const char *)[[self safeSubdataWithRange:NSMakeRange(0, 2)] bytes];
-  return (strncmp("#!", magic, 2) == 0);
+  return (magic && memcmp("#!", magic, 2) == 0);
 }
 
 - (BOOL)isXARArchive {
   const char *magic = (const char *)[[self safeSubdataWithRange:NSMakeRange(0, 4)] bytes];
-  return (strncmp("xar!", magic, 4) == 0);
+  return (magic && memcmp("xar!", magic, 4) == 0);
 }
 
 - (BOOL)isDMG {
   NSUInteger last512 = self.fileSize - 512;
   const char *magic = (const char *)[[self safeSubdataWithRange:NSMakeRange(last512, 4)] bytes];
-  return (strncmp("koly", magic, 4) == 0);
+  return (magic && memcmp("koly", magic, 4) == 0);
 }
 
 #pragma mark Page Zero
@@ -230,7 +245,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
   if (!lcData) return NO;
 
   // This code assumes the __PAGEZERO is always the first load-command in the file.
-  // Given that the OS X ABI says "the static linker creates a __PAGEZERO segment
+  // Given that the macOS ABI says "the static linker creates a __PAGEZERO segment
   // as the first segment of an executable file." this should be OK.
   struct load_command *lc = (struct load_command *)[lcData bytes];
   if (lc->cmd == LC_SEGMENT) {
@@ -273,9 +288,10 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
     // Check that the full path is at least 4-levels deep:
     // e.g: /Calendar.app/Contents/MacOS/Calendar
     NSArray *pathComponents = [self.path pathComponents];
-    if ([pathComponents count] < 4) return nil;
+    NSUInteger pathComponentsCount = pathComponents.count;
+    if (pathComponentsCount < 4) return nil;
 
-    pathComponents = [pathComponents subarrayWithRange:NSMakeRange(0, [pathComponents count] - 3)];
+    pathComponents = [pathComponents subarrayWithRange:NSMakeRange(0, pathComponentsCount - 3)];
     NSBundle *bndl = [NSBundle bundleWithPath:[NSString pathWithComponents:pathComponents]];
     if (bndl && [bndl objectForInfoDictionaryKey:@"CFBundleIdentifier"]) self.bundleRef = bndl;
   }
@@ -310,7 +326,8 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
 }
 
 - (NSString *)bundleName {
-  return [[self.infoPlist objectForKey:@"CFBundleName"] description];
+  return [[self.infoPlist objectForKey:@"CFBundleDisplayName"] description] ?:
+         [[self.infoPlist objectForKey:@"CFBundleName"] description];
 }
 
 - (NSString *)bundleVersion {
@@ -444,7 +461,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
     if (!cmdData) return nil;
     struct segment_command_64 *lc = (struct segment_command_64 *)[cmdData bytes];
     if (lc->cmd == LC_SEGMENT || lc->cmd == LC_SEGMENT_64) {
-      if (strncmp(lc->segname, "__TEXT", 6) == 0) {
+      if (memcmp(lc->segname, "__TEXT", 6) == 0) {
         nsects = lc->nsects;
         offset += sz_segment;
         break;
@@ -458,7 +475,7 @@ extern NSString *const NSURLQuarantinePropertiesKey WEAK_IMPORT_ATTRIBUTE;
     NSData *sectData = [self safeSubdataWithRange:NSMakeRange(offset, sz_section)];
     if (!sectData) return nil;
     struct section_64 *sect = (struct section_64 *)[sectData bytes];
-    if (sect && strncmp(sect->sectname, "__info_plist", 12) == 0 && sect->size < 2000000) {
+    if (sect && memcmp(sect->sectname, "__info_plist", 12) == 0 && sect->size < 2000000) {
       NSData *plistData = [self safeSubdataWithRange:NSMakeRange(sect->offset, sect->size)];
       if (!plistData) return nil;
       NSDictionary *plist;

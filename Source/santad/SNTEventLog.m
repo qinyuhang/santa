@@ -28,6 +28,7 @@
 
 @interface SNTEventLog ()
 @property NSMutableDictionary *detailStore;
+@property dispatch_queue_t detailStoreQueue;
 @end
 
 @implementation SNTEventLog
@@ -36,18 +37,22 @@
   self = [super init];
   if (self) {
     _detailStore = [NSMutableDictionary dictionaryWithCapacity:10000];
+    _detailStoreQueue = dispatch_queue_create("com.google.santad.detail_store",
+                                              DISPATCH_QUEUE_SERIAL);
   }
   return self;
 }
 
 - (void)saveDecisionDetails:(SNTCachedDecision *)cd {
-  self.detailStore[@(cd.vnodeId)] = cd;
+  dispatch_sync(self.detailStoreQueue, ^{
+    self.detailStore[@(cd.vnodeId)] = cd;
+  });
 }
 
 - (void)logFileModification:(santa_message_t)message {
-  NSString *action, *path, *newpath, *sha256, *outStr;
+  NSString *action, *newpath;
 
-  path = @(message.path);
+  NSString *path = @(message.path);
 
   switch (message.action) {
     case ACTION_NOTIFY_DELETE: {
@@ -71,25 +76,19 @@
     }
     case ACTION_NOTIFY_WRITE: {
       action = @"WRITE";
-      SNTFileInfo *fileInfo = [[SNTFileInfo alloc] initWithPath:path];
-      if (fileInfo.fileSize < 1024 * 1024) {
-        sha256 = fileInfo.SHA256;
-      } else {
-        sha256 = @"(too large)";
-      }
       break;
     }
     default: action = @"UNKNOWN"; break;
   }
 
-  outStr = [NSString stringWithFormat:@"action=%@|path=%@", action, [self sanitizeString:path]];
+  // init the string with 2k capacity to avoid reallocs
+  NSMutableString *outStr = [NSMutableString stringWithCapacity:2048];
+  [outStr appendFormat:@"action=%@|path=%@", action, [self sanitizeString:path]];
   if (newpath) {
-    outStr = [outStr stringByAppendingFormat:@"|newpath=%@", [self sanitizeString:newpath]];
+    [outStr appendFormat:@"|newpath=%@", [self sanitizeString:newpath]];
   }
-  char ppath[PATH_MAX];
-  if (proc_pidpath(message.pid, ppath, PATH_MAX) < 1) {
-    strncpy(ppath, "(null)", 6);
-  }
+  char ppath[PATH_MAX] = "(null)";
+  proc_pidpath(message.pid, ppath, PATH_MAX);
 
   NSString *user, *group;
   struct passwd *pw = getpwuid(message.uid);
@@ -97,14 +96,9 @@
   struct group *gr = getgrgid(message.gid);
   if (gr) group = @(gr->gr_name);
 
-  outStr = [outStr stringByAppendingFormat:(@"|pid=%d|ppid=%d|process=%s|processpath=%s|"
-                                            @"uid=%d|user=%@|gid=%d|group=%@"),
-                                           message.pid, message.ppid, message.pname, ppath,
-                                           message.uid, user, message.gid, group];
-  if (sha256) {
-    outStr = [outStr stringByAppendingFormat:@"|sha256=%@", sha256];
-  }
-
+  [outStr appendFormat:@"|pid=%d|ppid=%d|process=%s|processpath=%s|uid=%d|user=%@|gid=%d|group=%@",
+                       message.pid, message.ppid, message.pname, ppath,
+                       message.uid, user, message.gid, group];
   LOGI(@"%@", outStr);
 }
 
@@ -113,75 +107,83 @@
 }
 
 - (void)logAllowedExecution:(santa_message_t)message {
-  SNTCachedDecision *cd = self.detailStore[@(message.vnode_id)];
+  __block SNTCachedDecision *cd;
+  dispatch_sync(self.detailStoreQueue, ^{
+    cd = self.detailStore[@(message.vnode_id)];
+  });
   [self logExecution:message withDecision:cd];
 }
 
 - (void)logExecution:(santa_message_t)message withDecision:(SNTCachedDecision *)cd {
-  NSString *d, *r, *args, *outLog;
+  NSString *d, *r;
+  BOOL logArgs = NO;
 
   switch (cd.decision) {
-    case EVENTSTATE_ALLOW_BINARY:
+    case SNTEventStateAllowBinary:
       d = @"ALLOW";
       r = @"BINARY";
-      args = [self argsForPid:message.pid];
+      logArgs = YES;
       break;
-    case EVENTSTATE_ALLOW_CERTIFICATE:
+    case SNTEventStateAllowCertificate:
       d = @"ALLOW";
       r = @"CERTIFICATE";
-      args = [self argsForPid:message.pid];
+      logArgs = YES;
       break;
-    case EVENTSTATE_ALLOW_SCOPE:
+    case SNTEventStateAllowScope:
       d = @"ALLOW";
       r = @"SCOPE";
-      args = [self argsForPid:message.pid];
+      logArgs = YES;
       break;
-    case EVENTSTATE_ALLOW_UNKNOWN:
+    case SNTEventStateAllowUnknown:
       d = @"ALLOW";
       r = @"UNKNOWN";
-      args = [self argsForPid:message.pid];
+      logArgs = YES;
       break;
-    case EVENTSTATE_BLOCK_BINARY:
+    case SNTEventStateBlockBinary:
       d = @"DENY";
       r = @"BINARY";
       break;
-    case EVENTSTATE_BLOCK_CERTIFICATE:
+    case SNTEventStateBlockCertificate:
       d = @"DENY";
       r = @"CERT";
       break;
-    case EVENTSTATE_BLOCK_SCOPE:
+    case SNTEventStateBlockScope:
       d = @"DENY";
       r = @"SCOPE";
       break;
-    case EVENTSTATE_BLOCK_UNKNOWN:
+    case SNTEventStateBlockUnknown:
       d = @"DENY";
       r = @"UNKNOWN";
       break;
     default:
       d = @"ALLOW";
       r = @"NOTRUNNING";
-      args = [self argsForPid:message.pid];
+      logArgs = YES;
       break;
   }
 
-  outLog = [NSString stringWithFormat:@"action=EXEC|decision=%@|reason=%@", d, r];
+  // init the string with 4k capacity to avoid reallocs
+  NSMutableString *outLog = [[NSMutableString alloc] initWithCapacity:4096];
+  [outLog appendFormat:@"action=EXEC|decision=%@|reason=%@", d, r];
 
   if (cd.decisionExtra) {
-    outLog = [outLog stringByAppendingFormat:@"|explain=%@", cd.decisionExtra];
+    [outLog appendFormat:@"|explain=%@", cd.decisionExtra];
   }
 
-  outLog = [outLog stringByAppendingFormat:@"|sha256=%@|path=%@|args=%@", cd.sha256,
-                                           [self sanitizeString:@(message.path)],
-                                           [self sanitizeString:args]];
+  [outLog appendFormat:@"|sha256=%@|path=%@", cd.sha256, [self sanitizeString:@(message.path)]];
+
+  if (logArgs) {
+    [self addArgsForPid:message.pid toString:outLog];
+  }
 
   if (cd.certSHA256) {
-    outLog = [outLog stringByAppendingFormat:@"|cert_sha256=%@|cert_cn=%@", cd.certSHA256,
-                                             [self sanitizeString:cd.certCommonName]];
+    [outLog appendFormat:@"|cert_sha256=%@|cert_cn=%@", cd.certSHA256,
+                         [self sanitizeString:cd.certCommonName]];
   }
 
   if (cd.quarantineURL) {
-    outLog = [outLog stringByAppendingFormat:@"|quarantine_url=%@",
-                                             [self sanitizeString:cd.quarantineURL]];
+    [outLog appendFormat:@"|quarantine_url=%@",
+                         [self sanitizeString:cd.quarantineURL]];
   }
 
   NSString *user, *group;
@@ -190,76 +192,259 @@
   struct group *gr = getgrgid(message.gid);
   if (gr) group = @(gr->gr_name);
 
-  outLog = [outLog stringByAppendingFormat:@"|pid=%d|ppid=%d|uid=%d|user=%@|gid=%d|group=%@",
-                                           message.pid, message.ppid, message.uid, user,
-                                           message.gid, group];
+  [outLog appendFormat:@"|pid=%d|ppid=%d|uid=%d|user=%@|gid=%d|group=%@",
+                       message.pid, message.ppid, message.uid, user,
+                       message.gid, group];
 
   LOGI(@"%@", outLog);
 }
 
+- (void)logDiskAppeared:(NSDictionary *)diskProperties {
+  if (![diskProperties[@"DAVolumeMountable"] boolValue]) return;
+
+  NSString *dmgPath = @"";
+  NSString *serial = @"";
+  if ([diskProperties[@"DADeviceModel"] isEqual:@"Disk Image"]) {
+    dmgPath = [self diskImageForDevice:diskProperties[@"DADevicePath"]];
+  } else {
+    serial = [self serialForDevice:diskProperties[@"DADevicePath"]];
+    serial = [serial stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+  }
+
+  NSString *model = [NSString stringWithFormat:@"%@ %@",
+                        diskProperties[@"DADeviceVendor"] ?: @"",
+                        diskProperties[@"DADeviceModel"] ?: @""];
+  model = [model stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+
+  LOGI(@"action=DISKAPPEAR|mount=%@|volume=%@|bsdname=%@|fs=%@|model=%@|serial=%@|bus=%@|dmgpath=%@",
+       [diskProperties[@"DAVolumePath"] path] ?: @"",
+       diskProperties[@"DAVolumeName"] ?: @"",
+       diskProperties[@"DAMediaBSDName"] ?: @"",
+       diskProperties[@"DAVolumeKind"] ?: @"",
+       model ?: @"",
+       serial,
+       diskProperties[@"DADeviceProtocol"] ?: @"",
+       dmgPath);
+}
+
+- (void)logDiskDisappeared:(NSDictionary *)diskProperties {
+  if (![diskProperties[@"DAVolumeMountable"] boolValue]) return;
+
+  LOGI(@"action=DISKDISAPPEAR|mount=%@|volume=%@|bsdname=%@",
+       [diskProperties[@"DAVolumePath"] path] ?: @"",
+       diskProperties[@"DAVolumeName"] ?: @"",
+       diskProperties[@"DAMediaBSDName"]);
+}
+
 #pragma mark Helpers
 
+/**
+  Sanitizes a given string if necessary, otherwise returns the original.
+*/
 - (NSString *)sanitizeString:(NSString *)inStr {
-  inStr = [inStr stringByReplacingOccurrencesOfString:@"|" withString:@"<pipe>"];
-  inStr = [inStr stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
-  inStr = [inStr stringByReplacingOccurrencesOfString:@"\r" withString:@"\\r"];
+  NSUInteger length = [inStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+  if (length < 1) return inStr;
+
+  NSString *ret = [self sanitizeCString:inStr.UTF8String ofLength:length];
+  if (ret) {
+    return ret;
+  }
   return inStr;
 }
 
-- (NSString *)argsForPid:(pid_t)pid {
-  int mib[3];
+/**
+  Sanitize the given C-string, replacing |, \n and \r characters.
 
-  // Get size of buffer required to store process arguments.
-  mib[0] = CTL_KERN;
-  mib[1] = KERN_ARGMAX;
-  int argmax;
-  size_t size = sizeof(argmax);
+  @return a new NSString with the replaced contents, if necessary, otherwise nil.
+*/
+- (NSString *)sanitizeCString:(const char *)str ofLength:(NSUInteger)length {
+  NSUInteger bufOffset = 0, strOffset = 0;
+  char c = 0;
+  char *buf = NULL;
+  BOOL shouldFree = NO;
 
-  if (sysctl(mib, 2, &argmax, &size, NULL, 0) == -1) return nil;
+  // Loop through the string one character at a time, looking for the characters
+  // we want to remove.
+  for (NSUInteger i = 0; i < length && (c = str[i]); ++i) {
+    if (c == '|' || c == '\n' || c == '\r') {
+      if (!buf) {
+        // If string size * 6 is more than 64KiB use malloc, otherwise use stack space.
+        if (length * 6 > 64 * 1024) {
+          buf = malloc(length * 6);
+          shouldFree = YES;
+        } else {
+          buf = alloca(length * 6);
+        }
+      }
 
-  // Create buffer to store args
-  NSMutableData *argsdata = [NSMutableData dataWithCapacity:argmax];
-  char *argsdatabytes = (char *)argsdata.mutableBytes;
+      // Copy from the last offset up to the character we just found into the buffer
+      memcpy(buf + bufOffset, str + strOffset, i - strOffset);
 
-  // Fetch args
-  mib[0] = CTL_KERN;
-  mib[1] = KERN_PROCARGS2;
-  mib[2] = pid;
-  size = (size_t)argmax;
-  if (sysctl(mib, 3, argsdatabytes, &size, NULL, 0) == -1) return nil;
+      // Update the buffer and string offsets
+      bufOffset += i - strOffset;
+      strOffset = i + 1;
 
-  // Get argc
-  int argc;
-  memcpy(&argc, argsdatabytes, sizeof(argc));
-
-  // Get pointer to beginning of string space
-  char *cp = (char *)argsdatabytes + sizeof(argc);
-
-  // Skip over exec_path
-  for (; cp < &argsdatabytes[size]; ++cp) {
-    if (*cp == '\0') {
-      cp++;
-      break;
+      // Replace the found character and advance the buffer offset
+      switch (c) {
+        case '|':
+          memcpy(buf + bufOffset, "<pipe>", 6);
+          bufOffset += 6;
+          break;
+        case '\n':
+          memcpy(buf + bufOffset, "\\n", 2);
+          bufOffset += 2;
+          break;
+        case '\r':
+          memcpy(buf + bufOffset, "\\r", 2);
+          bufOffset += 2;
+          break;
+      }
     }
   }
 
-  // Skip trailing NULL bytes
-  for (; cp < &argsdatabytes[size]; ++cp) {
-    if (*cp != '\0') break;
+  if (strOffset > 0 && strOffset < length) {
+    // Copy any characters from the last match to the end of the string into the buffer.
+    memcpy(buf + bufOffset, str + strOffset, length - strOffset);
+    bufOffset += length - strOffset;
   }
 
-  // Loop over the argv array, stripping newlines in each arg and putting in a new array.
-  NSMutableArray *args = [NSMutableArray arrayWithCapacity:argc];
-  for (int i = 0; i < argc; ++i) {
-    NSString *arg = @(cp);
-    if (arg) [args addObject:arg];
+  if (buf) {
+    // Only return a new string if there were matches
+    NSString *ret = [[NSString alloc] initWithBytes:buf
+                                             length:bufOffset
+                                           encoding:NSUTF8StringEncoding];
+    if (shouldFree) {
+      free(buf);
+    }
 
-    // Move the pointer past this string and the terminator at the end.
-    cp += strlen(cp) + 1;
+    return ret;
+  }
+  return nil;
+}
+
+/**
+  Use sysctl to get the arguments for a PID, appended to the given string.
+*/
+- (void)addArgsForPid:(pid_t)pid toString:(NSMutableString *)str {
+  size_t argsSizeEstimate = 0, argsSize = 0, index = 0;
+
+  // Use stack space up to 128KiB.
+  const size_t MAX_STACK_ALLOC = 128 * 1024;
+  char *bytes = alloca(MAX_STACK_ALLOC);
+  BOOL shouldFree = NO;
+
+  int mib[] = {CTL_KERN, KERN_PROCARGS2, pid};
+
+  // Get estimated length of arg array
+  if (sysctl(mib, 3, NULL, &argsSizeEstimate, NULL, 0) < 0) return;
+  argsSize = argsSizeEstimate + 512;
+
+  // If this is larger than our allocated stack space, alloc from heap.
+  if (argsSize > MAX_STACK_ALLOC) {
+    bytes = malloc(argsSize);
+    shouldFree = YES;
   }
 
-  // Return the args as a space-separated list
-  return [args componentsJoinedByString:@" "];
+  // Get the args. If this fails, free if necessary and return.
+  if (sysctl(mib, 3, bytes, &argsSize, NULL, 0) != 0 || argsSize >= argsSizeEstimate + 512) {
+    if (shouldFree) {
+      free(bytes);
+    }
+    return;
+  }
+
+  // Get argc, set index to the end of argc
+  int argc = 0;
+  memcpy(&argc, &bytes[0], sizeof(argc));
+  index = sizeof(argc);
+
+  // Skip past end of executable path and trailing NULLs
+  for (; index < argsSize; ++index) {
+    if (bytes[index] == '\0') {
+      ++index;
+      break;
+    }
+  }
+  for (; index < argsSize; ++index) {
+    if (bytes[index] != '\0') break;
+  }
+
+  // Save the beginning of the arguments
+  size_t stringStart = index;
+
+  // Replace all NULLs with spaces up until the first environment variable
+  int replacedNulls = 0;
+  for (; index < argsSize && replacedNulls < argc - 1; ++index) {
+    if (bytes[index] == '\0') {
+      bytes[index] = ' ';
+      ++replacedNulls;
+    }
+  }
+
+  // Potentially sanitize the args string.
+  NSString *sanitized = [self sanitizeCString:&bytes[stringStart] ofLength:index - stringStart];
+  if (sanitized) {
+    [str appendFormat:@"|args=%@", sanitized];
+  } else {
+    [str appendFormat:@"|args=%s", &bytes[stringStart]];
+  }
+
+  if (shouldFree) {
+    free(bytes);
+  }
+}
+
+/**
+  Given an IOKit device path (like those provided by DiskArbitration), find the disk
+  image path by looking up the device in the IOKit registry and getting its properties.
+
+  This is largely the same as the way hdiutil gathers info for the "info" command.
+*/
+- (NSString *)diskImageForDevice:(NSString *)devPath {
+  devPath = [devPath stringByDeletingLastPathComponent];
+  if (!devPath.length) return nil;
+  io_registry_entry_t device = IORegistryEntryFromPath(kIOMasterPortDefault, devPath.UTF8String);
+  CFMutableDictionaryRef deviceProperties = NULL;
+  IORegistryEntryCreateCFProperties(device, &deviceProperties, kCFAllocatorDefault, kNilOptions);
+  NSDictionary *properties = CFBridgingRelease(deviceProperties);
+  IOObjectRelease(device);
+
+  NSData *pathData = properties[@"image-path"];
+  NSString *result = [[NSString alloc] initWithData:pathData encoding:NSUTF8StringEncoding];
+
+  return result;
+}
+
+/**
+ Given an IOKit device path (like those provided by DiskArbitration), find the device serial number,
+ if there is one. This has only really been tested with USB and internal devices.
+*/
+- (NSString *)serialForDevice:(NSString *)devPath {
+  if (!devPath.length) return nil;
+  NSString *serial;
+  io_registry_entry_t device = IORegistryEntryFromPath(kIOMasterPortDefault, devPath.UTF8String);
+  while (!serial && device) {
+    CFMutableDictionaryRef deviceProperties = NULL;
+    IORegistryEntryCreateCFProperties(device, &deviceProperties, kCFAllocatorDefault, kNilOptions);
+    NSDictionary *properties = CFBridgingRelease(deviceProperties);
+    if (properties[@"Serial Number"]) {
+      serial = properties[@"Serial Number"];
+    } else if (properties[@"kUSBSerialNumberString"]) {
+      serial = properties[@"kUSBSerialNumberString"];
+    }
+
+    if (serial) {
+      IOObjectRelease(device);
+      break;
+    }
+
+    io_registry_entry_t parent;
+    IORegistryEntryGetParentEntry(device, kIOServicePlane, &parent);
+    IOObjectRelease(device);
+    device = parent;
+  }
+
+  return serial;
 }
 
 @end

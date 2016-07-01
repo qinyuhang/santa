@@ -55,9 +55,12 @@ static NSMutableDictionary *registeredCommands;
 + (NSString *)helpForCommandWithName:(NSString *)commandName {
   Class<SNTCommand> command = registeredCommands[commandName];
   if (command) {
+    NSString *shortHelp = [command shortHelpText];
     NSString *longHelp = [command longHelpText];
     if (longHelp) {
       return [NSString stringWithFormat:@"Help for '%@':\n%@", commandName, longHelp];
+    } else if (shortHelp) {
+      return [NSString stringWithFormat:@"Help for '%@':\n%@", commandName, shortHelp];
     } else {
       return @"This command does not have any help information.";
     }
@@ -65,15 +68,16 @@ static NSMutableDictionary *registeredCommands;
   return nil;
 }
 
-+ (SNTXPCConnection *)connectToDaemon {
++ (SNTXPCConnection *)connectToDaemonRequired:(BOOL)required {
   SNTXPCConnection *daemonConn = [SNTXPCControlInterface configuredConnection];
 
-  daemonConn.invalidationHandler = ^{
-    printf("An error occurred communicating with the daemon, is it running?\n");
-    exit(1);
-  };
-
-  [daemonConn resume];
+  if (required) {
+    daemonConn.invalidationHandler = ^{
+      printf("An error occurred communicating with the daemon, is it running?\n");
+      exit(1);
+    };
+    [daemonConn resume];
+  }
   return daemonConn;
 }
 
@@ -89,11 +93,7 @@ static NSMutableDictionary *registeredCommands;
     exit(2);
   }
 
-  SNTXPCConnection *daemonConn;
-  if ([command requiresDaemonConn]) {
-    daemonConn = [self connectToDaemon];
-  }
-
+  SNTXPCConnection *daemonConn = [self connectToDaemonRequired:[command requiresDaemonConn]];
   [command runWithArguments:arguments daemonConnection:daemonConn];
 
   // The command is responsible for quitting.

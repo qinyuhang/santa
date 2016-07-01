@@ -12,7 +12,7 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-#include "SNTCommonEnums.h"
+#import "SNTCommonEnums.h"
 #include "SNTKernelCommon.h"
 
 @class MOLCodesignChecker;
@@ -33,12 +33,6 @@
 ///    + (If denied) Potentially sending a message to SantaGUI to notify the user
 ///
 @interface SNTExecutionController : NSObject
-
-@property SNTDriverManager *driverManager;
-@property SNTEventLog *eventLog;
-@property SNTEventTable *eventTable;
-@property SNTNotificationQueue *notifierQueue;
-@property SNTRuleTable *ruleTable;
 
 - (instancetype)initWithDriverManager:(SNTDriverManager *)driverManager
                             ruleTable:(SNTRuleTable *)ruleTable

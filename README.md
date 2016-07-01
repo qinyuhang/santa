@@ -7,7 +7,7 @@ Santa  [![Build Status](https://travis-ci.org/google/santa.png?branch=master)](h
 </a>
 </p>
 
-Santa is a binary whitelisting/blacklisting system for OS X. It consists of
+Santa is a binary whitelisting/blacklisting system for macOS. It consists of
 a kernel extension that monitors for executions, a userland daemon that makes
 execution decisions based on the contents of a SQLite database, a GUI agent that
 notifies the user in case of a block decision and a command-line utility for
@@ -68,7 +68,7 @@ hosts in whatever other ways you see fit.
 Get Help
 ========
 
-If you have questions or need help getting started, the 
+If you have questions or need help getting started, the
 [santa-dev](https://groups.google.com/forum/#!forum/santa-dev) group is the
 best place to start.
 
@@ -108,6 +108,15 @@ option) if it would be useful to others.
 
 * Tests: There aren't enough of them.
 
+Screenshots
+===========
+
+A tool like Santa doesn't really lend itself to screenshots, so here's a video instead.
+
+<p align="center">
+<img src="https://zippy.gfycat.com/MadFatalAmphiuma.gif" alt="Santa Block Video" />
+</p>
+
 Building
 ========
 ```sh
@@ -127,7 +136,7 @@ and for security-reasons parts of Santa will not operate properly if not signed.
 
 Kext Signing
 ============
-Kernel extensions on OS X 10.9 and later must be signed using an Apple-provided
+Kernel extensions on macOS 10.9 and later must be signed using an Apple-provided
 Developer ID certificate with a kernel extension flag. Without it, the only way
 to load an extension is to enable kext-dev-mode or disable SIP, depending on the
 OS version.

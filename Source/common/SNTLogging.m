@@ -42,10 +42,8 @@ void logMessage(LogLevel level, FILE *destination, NSString *format, ...) {
     }
 
     // If requested, redirect output to syslog.
-    if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--syslog"] ||
-        strcmp(binaryName, "santad") == 0) {
+    if ([[[NSProcessInfo processInfo] arguments] containsObject:@"--syslog"]) {
       useSyslog = YES;
-
       pthread_key_create(&syslogKey, syslogClientDestructor);
     }
   });
@@ -54,7 +52,7 @@ void logMessage(LogLevel level, FILE *destination, NSString *format, ...) {
 
   va_list args;
   va_start(args, format);
-  NSString *s = [[NSString alloc] initWithFormat:format arguments:args];
+  NSMutableString *s = [[NSMutableString alloc] initWithFormat:format arguments:args];
   va_end(args);
 
   if (useSyslog) {
@@ -88,6 +86,8 @@ void logMessage(LogLevel level, FILE *destination, NSString *format, ...) {
 
     asl_log(client, NULL, syslogLevel, "%s %s: %s", levelName, binaryName, [s UTF8String]);
   } else {
-    fprintf(destination, "%s\n", [s UTF8String]);
+    [s appendString:@"\n"];
+    size_t len = [s lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+    fwrite([s UTF8String], len, 1, destination);
   }
 }

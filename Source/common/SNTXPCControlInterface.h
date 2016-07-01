@@ -12,7 +12,8 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-#include "SNTCommonEnums.h"
+#import "SNTCommonEnums.h"
+#import "SNTKernelCommon.h"
 
 @class SNTRule;
 @class SNTStoredEvent;
@@ -28,29 +29,31 @@
 ///
 - (void)cacheCount:(void (^)(int64_t))reply;
 - (void)flushCache:(void (^)(BOOL))reply;
+- (void)checkCacheForVnodeID:(uint64_t)vnodeID withReply:(void (^)(santa_action_t))reply;
 
 ///
 ///  Database ops
 ///
 - (void)databaseRuleCounts:(void (^)(int64_t binary, int64_t certificate))reply;
-- (void)databaseRuleAddRule:(SNTRule *)rule
-                 cleanSlate:(BOOL)cleanSlate
-                      reply:(void (^)(BOOL success))reply;
 - (void)databaseRuleAddRules:(NSArray *)rules
                   cleanSlate:(BOOL)cleanSlate
-                       reply:(void (^)(BOOL success))reply;
+                       reply:(void (^)(NSError *error))reply;
 
 - (void)databaseEventCount:(void (^)(int64_t count))reply;
 - (void)databaseEventForSHA256:(NSString *)sha256 reply:(void (^)(SNTStoredEvent *))reply;
 - (void)databaseEventsPending:(void (^)(NSArray *events))reply;
 - (void)databaseRemoveEventsWithIDs:(NSArray *)ids;
+- (void)databaseBinaryRuleForSHA256:(NSString *)sha256 reply:(void (^)(SNTRule *))reply;
+- (void)databaseCertificateRuleForSHA256:(NSString *)sha256 reply:(void (^)(SNTRule *))reply;
 
 ///
 ///  Config ops
 ///
 - (void)watchdogInfo:(void (^)(uint64_t, uint64_t, double, double))reply;
-- (void)clientMode:(void (^)(santa_clientmode_t))reply;
-- (void)setClientMode:(santa_clientmode_t)mode reply:(void (^)())reply;
+- (void)clientMode:(void (^)(SNTClientMode))reply;
+- (void)setClientMode:(SNTClientMode)mode reply:(void (^)())reply;
+- (void)xsrfToken:(void (^)(NSString *))reply;
+- (void)setXsrfToken:(NSString *)token reply:(void (^)())reply;
 - (void)setNextSyncInterval:(uint64_t)seconds reply:(void (^)())reply;
 - (void)setSyncLastSuccess:(NSDate *)date reply:(void (^)())reply;
 - (void)setSyncCleanRequired:(BOOL)cleanReqd reply:(void (^)())reply;

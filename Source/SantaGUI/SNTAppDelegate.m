@@ -18,6 +18,7 @@
 #import "SNTConfigurator.h"
 #import "SNTFileWatcher.h"
 #import "SNTNotificationManager.h"
+#import "SNTStrengthify.h"
 #import "SNTXPCConnection.h"
 #import "SNTXPCControlInterface.h"
 
@@ -36,8 +37,8 @@
   [self setupMenu];
 
   self.configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath
-                                                            handler:^{
-    [[SNTConfigurator configurator] reloadConfigData];
+                                                            handler:^(unsigned long data) {
+    if (! (data & DISPATCH_VNODE_ATTRIB)) [[SNTConfigurator configurator] reloadConfigData];
   }];
 
   self.notificationManager = [[SNTNotificationManager alloc] init];
@@ -71,28 +72,37 @@
 #pragma mark Connection handling
 
 - (void)createConnection {
-  dispatch_async(dispatch_get_main_queue(), ^{
-    __weak __typeof(self) weakSelf = self;
+  dispatch_semaphore_t sema = dispatch_semaphore_create(0);
 
-    NSXPCListener *listener = [NSXPCListener anonymousListener];
-    self.listener = [[SNTXPCConnection alloc] initServerWithListener:listener];
-    self.listener.exportedInterface = [SNTXPCNotifierInterface notifierInterface];
-    self.listener.exportedObject = self.notificationManager;
-    self.listener.invalidationHandler = ^{
-      [weakSelf attemptReconnection];
-    };
-    [self.listener resume];
+  WEAKIFY(self);
 
-    SNTXPCConnection *daemonConn = [SNTXPCControlInterface configuredConnection];
-    [daemonConn resume];
-    [[daemonConn remoteObjectProxy] setNotificationListener:listener.endpoint];
-  });
+  // Create listener for return connection from daemon.
+  NSXPCListener *listener = [NSXPCListener anonymousListener];
+  self.listener = [[SNTXPCConnection alloc] initServerWithListener:listener];
+  self.listener.exportedInterface = [SNTXPCNotifierInterface notifierInterface];
+  self.listener.exportedObject = self.notificationManager;
+  self.listener.acceptedHandler = ^{
+    dispatch_semaphore_signal(sema);
+  };
+  self.listener.invalidationHandler = ^{
+    STRONGIFY(self);
+    [self attemptReconnection];
+  };
+  [self.listener resume];
+
+  // Tell daemon to connect back to the above listener.
+  SNTXPCConnection *daemonConn = [SNTXPCControlInterface configuredConnection];
+  [daemonConn resume];
+  [[daemonConn remoteObjectProxy] setNotificationListener:listener.endpoint];
+
+  // Now wait for the connection to come in.
+  if (dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+    [self attemptReconnection];
+  }
 }
 
 - (void)attemptReconnection {
-  // TODO(rah): Make this smarter.
-  sleep(5);
-  [self createConnection];
+  [self performSelectorInBackground:@selector(createConnection) withObject:nil];
 }
 
 #pragma mark Menu Management

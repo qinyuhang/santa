@@ -12,63 +12,58 @@
 ///    See the License for the specific language governing permissions and
 ///    limitations under the License.
 
-#ifndef SANTA__COMMON__COMMONENUMS_H
-#define SANTA__COMMON__COMMONENUMS_H
-
 ///
 ///  These enums are used in various places throughout the Santa client code.
 ///  The integer values are also stored in the database and so shouldn't be changed.
 ///
 
-typedef enum {
-  RULETYPE_UNKNOWN,
+typedef NS_ENUM(NSInteger, SNTRuleType) {
+  SNTRuleTypeUnknown,
 
-  RULETYPE_BINARY = 1,
-  RULETYPE_CERT = 2,
+  SNTRuleTypeBinary = 1,
+  SNTRuleTypeCertificate = 2,
+};
 
-  RULETYPE_MAX
-} santa_ruletype_t;
+typedef NS_ENUM(NSInteger, SNTRuleState) {
+  SNTRuleStateUnknown,
 
-typedef enum {
-  RULESTATE_UNKNOWN,
+  SNTRuleStateWhitelist = 1,
+  SNTRuleStateBlacklist = 2,
+  SNTRuleStateSilentBlacklist = 3,
+  SNTRuleStateRemove = 4,
+};
 
-  RULESTATE_WHITELIST = 1,
-  RULESTATE_BLACKLIST = 2,
-  RULESTATE_SILENT_BLACKLIST = 3,
-  RULESTATE_REMOVE = 4,
+typedef NS_ENUM(NSInteger, SNTClientMode) {
+  SNTClientModeUnknown,
 
-  RULESTATE_MAX
-} santa_rulestate_t;
+  SNTClientModeMonitor = 1,
+  SNTClientModeLockdown = 2,
+};
 
-typedef enum {
-  CLIENTMODE_UNKNOWN,
+typedef NS_ENUM(NSInteger, SNTEventState) {
+  SNTEventStateUnknown,
 
-  CLIENTMODE_MONITOR = 1,
-  CLIENTMODE_LOCKDOWN = 2,
+  SNTEventStateAllowUnknown = 1,
+  SNTEventStateAllowBinary = 2,
+  SNTEventStateAllowCertificate = 3,
+  SNTEventStateAllowScope = 4,
 
-  CLIENTMODE_MAX
-} santa_clientmode_t;
+  SNTEventStateBlockUnknown = 5,
+  SNTEventStateBlockBinary = 6,
+  SNTEventStateBlockCertificate = 7,
+  SNTEventStateBlockScope = 8,
 
-typedef enum {
-  EVENTSTATE_UNKNOWN,
+  SNTEventStateBundleBinary = 9,
+};
 
-  EVENTSTATE_ALLOW_UNKNOWN = 1,
-  EVENTSTATE_ALLOW_BINARY = 2,
-  EVENTSTATE_ALLOW_CERTIFICATE = 3,
-  EVENTSTATE_ALLOW_SCOPE = 4,
-
-  EVENTSTATE_BLOCK_UNKNOWN = 5,
-  EVENTSTATE_BLOCK_BINARY = 6,
-  EVENTSTATE_BLOCK_CERTIFICATE = 7,
-  EVENTSTATE_BLOCK_SCOPE = 8,
-
-  EVENTSTATE_RELATED_BINARY = 9,
-
-  EVENTSTATE_MAX
-} santa_eventstate_t;
+typedef NS_ENUM(NSInteger, SNTRuleTableError) {
+  SNTRuleTableErrorEmptyRuleArray,
+  SNTRuleTableErrorInsertOrReplaceFailed,
+  SNTRuleTableErrorInvalidRule,
+  SNTRuleTableErrorMissingRequiredRule,
+  SNTRuleTableErrorRemoveFailed
+};
 
 static const char *kKextPath = "/Library/Extensions/santa-driver.kext";
 static const char *kSantaDPath = "/Library/Extensions/santa-driver.kext/Contents/MacOS/santad";
 static const char *kSantaCtlPath = "/Library/Extensions/santa-driver.kext/Contents/MacOS/santactl";
-
-#endif  // SANTA__COMMON__COMMONENUMS_H

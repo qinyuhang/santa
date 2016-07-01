@@ -14,11 +14,11 @@
 
 #import "SNTApplication.h"
 
+#import <DiskArbitration/DiskArbitration.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "SNTCommonEnums.h"
-
+#import "SNTCommonEnums.h"
 #import "SNTConfigurator.h"
 #import "SNTDaemonControlController.h"
 #import "SNTDatabaseController.h"
@@ -34,6 +34,7 @@
 #import "SNTXPCControlInterface.h"
 
 @interface SNTApplication ()
+@property DASessionRef diskArbSession;
 @property SNTDriverManager *driverManager;
 @property SNTEventLog *eventLog;
 @property SNTExecutionController *execController;
@@ -51,8 +52,6 @@
 
     if (!_driverManager) {
       LOGE(@"Failed to connect to driver, exiting.");
-
-      // TODO(rah): Consider trying to load the extension from within santad.
       return nil;
     }
 
@@ -81,12 +80,34 @@
     _controlConnection.exportedObject = dc;
     [_controlConnection resume];
 
-    _configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath handler:^{
-      [[SNTConfigurator configurator] reloadConfigData];
+    __block SNTClientMode origMode = [[SNTConfigurator configurator] clientMode];
+    _configFileWatcher = [[SNTFileWatcher alloc] initWithFilePath:kDefaultConfigFilePath
+                                                          handler:^(unsigned long data) {
+      if (data & DISPATCH_VNODE_ATTRIB) {
+        const char *cPath = [kDefaultConfigFilePath fileSystemRepresentation];
+        struct stat fileStat;
+        stat(cPath, &fileStat);
+        int mask = S_IRWXU | S_IRWXG | S_IRWXO;
+        int desired = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+        if (fileStat.st_uid != 0 || fileStat.st_gid != 0 || (fileStat.st_mode & mask) != desired) {
+          LOGD(@"Config file permissions changed, fixing.");
+          chown(cPath, 0, 0);
+          chmod(cPath, desired);
+        }
+      } else {
+        LOGD(@"Config file changed, reloading.");
+        [[SNTConfigurator configurator] reloadConfigData];
 
-      // Ensure config file remains root:wheel 0644
-      chown([kDefaultConfigFilePath fileSystemRepresentation], 0, 0);
-      chmod([kDefaultConfigFilePath fileSystemRepresentation], 0644);
+        // Flush cache if client just went into lockdown.
+        SNTClientMode newMode = [[SNTConfigurator configurator] clientMode];
+        if (origMode != newMode) {
+          origMode = newMode;
+          if (newMode == SNTClientModeLockdown) {
+            LOGI(@"Changed client mode, flushing cache.");
+            [self.driverManager flushCache];
+          }
+        }
+      }
     }];
 
     _eventLog = [[SNTEventLog alloc] init];
@@ -108,6 +129,7 @@
 
   [self performSelectorInBackground:@selector(beginListeningForDecisionRequests) withObject:nil];
   [self performSelectorInBackground:@selector(beginListeningForLogRequests) withObject:nil];
+  [self performSelectorInBackground:@selector(beginListeningForDiskMounts) withObject:nil];
 }
 
 - (void)beginListeningForDecisionRequests {
@@ -141,7 +163,7 @@
   dispatch_queue_t log_queue = dispatch_queue_create(
       "com.google.santad.log_queue", DISPATCH_QUEUE_CONCURRENT);
   dispatch_set_target_queue(
-      log_queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
+      log_queue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0));
 
   [self.driverManager listenForLogRequests:^(santa_message_t message) {
     @autoreleasepool {
@@ -173,5 +195,39 @@
     }
   }];
 }
+
+- (void)beginListeningForDiskMounts {
+  dispatch_queue_t disk_queue = dispatch_queue_create(
+      "com.google.santad.disk_queue", DISPATCH_QUEUE_SERIAL);
+
+  _diskArbSession = DASessionCreate(NULL);
+  DASessionSetDispatchQueue(_diskArbSession, disk_queue);
+
+  DARegisterDiskAppearedCallback(
+      _diskArbSession, NULL, diskAppearedCallback, (__bridge void *)self);
+  DARegisterDiskDescriptionChangedCallback(
+      _diskArbSession, NULL, NULL, diskDescriptionChangedCallback, (__bridge void *)self);
+  DARegisterDiskDisappearedCallback(
+      _diskArbSession, NULL, diskDisappearedCallback, (__bridge void *)self);
+}
+
+void diskAppearedCallback(DADiskRef disk, void *context) {
+  SNTApplication *app = (__bridge SNTApplication *)context;
+  NSDictionary *props = CFBridgingRelease(DADiskCopyDescription(disk));
+  [app.eventLog logDiskAppeared:props];
+}
+
+void diskDescriptionChangedCallback(DADiskRef disk, CFArrayRef keys, void *context) {
+  SNTApplication *app = (__bridge SNTApplication *)context;
+  NSDictionary *props = CFBridgingRelease(DADiskCopyDescription(disk));
+  if (props[@"DAVolumePath"]) [app.eventLog logDiskAppeared:props];
+}
+
+void diskDisappearedCallback(DADiskRef disk, void *context) {
+  SNTApplication *app = (__bridge SNTApplication *)context;
+  NSDictionary *props = CFBridgingRelease(DADiskCopyDescription(disk));
+  [app.eventLog logDiskDisappeared:props];
+}
+
 
 @end

@@ -33,6 +33,7 @@ double watchdogCPUPeak = 0;
 double watchdogRAMPeak = 0;
 
 @interface SNTDaemonControlController ()
+@property NSString *_syncXsrfToken;
 @property dispatch_source_t syncTimer;
 @end
 
@@ -90,6 +91,10 @@ double watchdogRAMPeak = 0;
   reply([self.driverManager flushCache]);
 }
 
+- (void)checkCacheForVnodeID:(uint64_t)vnodeID withReply:(void (^)(santa_action_t))reply {
+  reply([self.driverManager checkCache:vnodeID]);
+}
+
 #pragma mark Database ops
 
 - (void)databaseRuleCounts:(void (^)(int64_t binary, int64_t certificate))reply {
@@ -97,23 +102,20 @@ double watchdogRAMPeak = 0;
   reply([rdb binaryRuleCount], [rdb certificateRuleCount]);
 }
 
-- (void)databaseRuleAddRule:(SNTRule *)rule cleanSlate:(BOOL)cleanSlate
-                      reply:(void (^)(BOOL success))reply {
-  [self databaseRuleAddRules:@[ rule ] cleanSlate:cleanSlate reply:reply];
-}
-
-- (void)databaseRuleAddRules:(NSArray *)rules cleanSlate:(BOOL)cleanSlate
-                       reply:(void (^)(BOOL success))reply {
-  BOOL success = [[SNTDatabaseController ruleTable] addRules:rules cleanSlate:cleanSlate];
+- (void)databaseRuleAddRules:(NSArray *)rules
+                  cleanSlate:(BOOL)cleanSlate
+                       reply:(void (^)(NSError *error))reply {
+  NSError *error;
+  [[SNTDatabaseController ruleTable] addRules:rules cleanSlate:cleanSlate error:&error];
 
   // If any rules were added that were not whitelist, flush cache.
-  NSPredicate *p = [NSPredicate predicateWithFormat:@"SELF.state != %d", RULESTATE_WHITELIST];
+  NSPredicate *p = [NSPredicate predicateWithFormat:@"SELF.state != %d", SNTRuleStateWhitelist];
   if ([rules filteredArrayUsingPredicate:p].count || cleanSlate) {
     LOGI(@"Received non-whitelist rule, flushing cache");
     [self.driverManager flushCache];
   }
 
-  reply(success);
+  reply(error);
 }
 
 - (void)databaseEventCount:(void (^)(int64_t count))reply {
@@ -132,14 +134,34 @@ double watchdogRAMPeak = 0;
   [[SNTDatabaseController eventTable] deleteEventsWithIds:ids];
 }
 
+- (void)databaseBinaryRuleForSHA256:(NSString *)sha256 reply:(void (^)(SNTRule *))reply {
+  reply([[SNTDatabaseController ruleTable] binaryRuleForSHA256:sha256]);
+}
+
+- (void)databaseCertificateRuleForSHA256:(NSString *)sha256 reply:(void (^)(SNTRule *))reply {
+  reply([[SNTDatabaseController ruleTable] certificateRuleForSHA256:sha256]);
+}
+
 #pragma mark Config Ops
 
-- (void)clientMode:(void (^)(santa_clientmode_t))reply {
+- (void)clientMode:(void (^)(SNTClientMode))reply {
   reply([[SNTConfigurator configurator] clientMode]);
 }
 
-- (void)setClientMode:(santa_clientmode_t)mode reply:(void (^)())reply {
-  [[SNTConfigurator configurator] setClientMode:mode];
+- (void)setClientMode:(SNTClientMode)mode reply:(void (^)())reply {
+  if ([[SNTConfigurator configurator] clientMode] != mode) {
+    [[SNTConfigurator configurator] setClientMode:mode];
+    [[self.notQueue.notifierConnection remoteObjectProxy] postClientModeNotification:mode];
+  }
+  reply();
+}
+
+- (void)xsrfToken:(void (^)(NSString *))reply {
+  reply(self._syncXsrfToken);
+}
+
+- (void)setXsrfToken:(NSString *)token reply:(void (^)())reply {
+  self._syncXsrfToken = token;
   reply();
 }
 
