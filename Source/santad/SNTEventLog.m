@@ -90,13 +90,14 @@
   char ppath[PATH_MAX] = "(null)";
   proc_pidpath(message.pid, ppath, PATH_MAX);
 
-  NSString *user, *group;
+  const char *user = "";
+  const char *group = "";
   struct passwd *pw = getpwuid(message.uid);
-  if (pw) user = @(pw->pw_name);
+  if (pw) user = pw->pw_name;
   struct group *gr = getgrgid(message.gid);
-  if (gr) group = @(gr->gr_name);
+  if (gr) group = gr->gr_name;
 
-  [outStr appendFormat:@"|pid=%d|ppid=%d|process=%s|processpath=%s|uid=%d|user=%@|gid=%d|group=%@",
+  [outStr appendFormat:@"|pid=%d|ppid=%d|process=%s|processpath=%s|uid=%d|user=%s|gid=%d|group=%s",
                        message.pid, message.ppid, message.pname, ppath,
                        message.uid, user, message.gid, group];
   LOGI(@"%@", outStr);
@@ -265,7 +266,11 @@
 
   // Loop through the string one character at a time, looking for the characters
   // we want to remove.
+<<<<<<< HEAD
   for (NSUInteger i = 0; i < length && (c = str[i]); ++i) {
+=======
+  for (const char *p = str; (c = *p) != 0; ++p) {
+>>>>>>> google/master
     if (c == '|' || c == '\n' || c == '\r') {
       if (!buf) {
         // If string size * 6 is more than 64KiB use malloc, otherwise use stack space.
@@ -374,10 +379,11 @@
 
   // Replace all NULLs with spaces up until the first environment variable
   int replacedNulls = 0;
-  for (; index < argsSize && replacedNulls < argc - 1; ++index) {
+  for (; index < argsSize; ++index) {
     if (bytes[index] == '\0') {
-      bytes[index] = ' ';
       ++replacedNulls;
+      if (replacedNulls == argc) break;
+      bytes[index] = ' ';
     }
   }
 
