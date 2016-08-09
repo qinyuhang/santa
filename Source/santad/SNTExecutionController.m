@@ -44,7 +44,7 @@
 @property SNTRuleTable *ruleTable;
 
 @property NSMutableDictionary *uploadBackoff;
-@property dispatch_queue_t eventUploadQueue;
+@property dispatch_queue_t eventQueue;
 @end
 
 @implementation SNTExecutionController
@@ -65,8 +65,7 @@
     _eventLog = eventLog;
 
     _uploadBackoff = [NSMutableDictionary dictionaryWithCapacity:128];
-    _eventUploadQueue = dispatch_queue_create("com.google.santad.event_upload",
-                                              DISPATCH_QUEUE_SERIAL);
+    _eventQueue = dispatch_queue_create("com.google.santad.event_upload", DISPATCH_QUEUE_SERIAL);
 
     // This establishes the XPC connection between libsecurity and syspolicyd.
     // Not doing this causes a deadlock as establishing this link goes through xpcproxy.
@@ -78,7 +77,7 @@
 #pragma mark Binary Validation
 
 - (SNTEventState)makeDecision:(SNTCachedDecision *)cd binaryInfo:(SNTFileInfo *)fi {
-  SNTRule *rule = [self.ruleTable binaryRuleForSHA256:cd.sha256];
+  SNTRule *rule = [_ruleTable binaryRuleForSHA256:cd.sha256];
   if (rule) {
     switch (rule.state) {
       case SNTRuleStateWhitelist:
@@ -92,7 +91,7 @@
     }
   }
 
-  rule = [self.ruleTable certificateRuleForSHA256:cd.certSHA256];
+  rule = [_ruleTable certificateRuleForSHA256:cd.certSHA256];
   if (rule) {
     switch (rule.state) {
       case SNTRuleStateWhitelist:
@@ -131,8 +130,7 @@
   SNTFileInfo *binInfo = [[SNTFileInfo alloc] initWithPath:@(message.path) error:&fileInfoError];
   if (!binInfo) {
     LOGW(@"Failed to read file %@: %@", binInfo.path, fileInfoError.localizedDescription);
-    [self.driverManager postToKernelAction:ACTION_RESPOND_ALLOW
-                                forVnodeID:message.vnode_id];
+    [_driverManager postToKernelAction:ACTION_RESPOND_ALLOW forVnodeID:message.vnode_id];
     return;
   }
 
@@ -153,10 +151,10 @@
 
   // Save decision details for logging the execution later.
   santa_action_t action = [self actionForEventState:cd.decision];
-  if (action == ACTION_RESPOND_ALLOW) [self.eventLog saveDecisionDetails:cd];
+  if (action == ACTION_RESPOND_ALLOW) [_eventLog saveDecisionDetails:cd];
 
   // Send the decision to the kernel.
-  [self.driverManager postToKernelAction:action forVnodeID:cd.vnodeId];
+  [_driverManager postToKernelAction:action forVnodeID:cd.vnodeId];
 
   // Log to database if necessary.
   if (cd.decision != SNTEventStateAllowBinary &&
@@ -198,15 +196,17 @@
     se.quarantineTimestamp = binInfo.quarantineTimestamp;
     se.quarantineAgentBundleID = binInfo.quarantineAgentBundleID;
 
-    [self.eventTable addStoredEvent:se];
+    dispatch_async(_eventQueue, ^{
+      [_eventTable addStoredEvent:se];
+    });
 
     // If binary was blocked, do the needful
     if (action != ACTION_RESPOND_ALLOW) {
-      [self.eventLog logDeniedExecution:cd withMessage:message];
+      [_eventLog logDeniedExecution:cd withMessage:message];
 
       // So the server has something to show the user straight away, initiate an event
       // upload for the blocked binary rather than waiting for the next sync.
-      dispatch_async(self.eventUploadQueue, ^{
+      dispatch_async(_eventQueue, ^{
         [self initiateEventUploadForEvent:se];
       });
 
@@ -225,7 +225,7 @@
         }
         [self printMessage:msg toTTYForPID:message.ppid];
 
-        [self.notifierQueue addEvent:se customMessage:cd.customMsg];
+        [_notifierQueue addEvent:se customMessage:cd.customMsg];
       }
     }
   }
@@ -272,18 +272,18 @@
 
 /**
   Workaround for issue with PrinterProxy.app.
- 
+
   Every time a new printer is added to the machine, a copy of the PrinterProxy.app is copied from
   the Print.framework to ~/Library/Printers with the name of the printer as the name of the app.
-  The binary inside is changed slightly (in a way that is unique to the printer name) and then 
-  re-signed with an adhoc signature. I don't know why this is done but it seems that the binary 
+  The binary inside is changed slightly (in a way that is unique to the printer name) and then
+  re-signed with an adhoc signature. I don't know why this is done but it seems that the binary
   itself doesn't need to be changed as copying the old one back in-place seems to work,
   so that's what we do.
- 
+
   If this workaround is applied the decision request is not responded to as the existing request
   is invalidated when the file is closed which will trigger a brand new request coming from the
   kernel.
- 
+
   @param fi, SNTFileInfo object for the binary being executed.
   @return YES if the workaround was applied, NO otherwise.
 */
